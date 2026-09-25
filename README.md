@@ -45,11 +45,11 @@ Pythonflow is tested on macOS 27.0 with Apple silicon.
 1. Download the project:
 
    ```bash
-   git clone https://github.com/DigitalN/powerflow.git
+   git clone https://github.com/DigitalN/pythonflow.git
    ```
 
    (Or use **Code → Download ZIP** on GitHub and unzip it.)
-2. In the `powerflow` folder, double-click **`First Time Setup.command`**. It
+2. In the `pythonflow` folder, double-click **`First Time Setup.command`**. It
    installs the pinned Python packages listed in
    `Application Files/requirements.txt`, then builds `Pythonflow.app` and installs
    it in `/Applications`. If macOS blocks the script, right-click it and choose
