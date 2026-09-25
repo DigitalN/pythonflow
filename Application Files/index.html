@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- No network access of any kind: everything is inline and data comes from the
+     pywebview bridge (window.pywebview.api), which is not an HTTP connection.
+     'unsafe-eval' is required because pywebview delivers API return values with
+     eval(); this page never evaluates strings itself. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="light dark">
+<title>Pythonflow</title>
+<style>
+:root {
+  --bg: #f5f5f7; --card: #ffffff; --card-2: #fafafa; --text: #1d1d1f; --muted: #6e6e73;
+  --faint: #aeaeb2; --line: rgba(0,0,0,.08); --line-strong: rgba(0,0,0,.14);
+  --accent: #007aff; --charge: #28a745; --drain: #f08c00; --screen: #af52de; --chip: #30b0c7;
+  --system: #007aff; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 0 0 .5px rgba(0,0,0,.06);
+  --seg-bg: rgba(0,0,0,.06); --seg-on: #ffffff; --danger: #d70015;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1c1e; --card: #2c2c2e; --card-2: #323234; --text: #f5f5f7; --muted: #a1a1a6;
+    --faint: #636366; --line: rgba(255,255,255,.08); --line-strong: rgba(255,255,255,.16);
+    --accent: #0a84ff; --charge: #32d74b; --drain: #ffb340; --screen: #bf5af2; --chip: #40c8e0;
+    --system: #0a84ff; --shadow: 0 0 0 .5px rgba(255,255,255,.08);
+    --seg-bg: rgba(255,255,255,.08); --seg-on: #636366; --danger: #ff6961;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1c1e; --card: #2c2c2e; --card-2: #323234; --text: #f5f5f7; --muted: #a1a1a6;
+  --faint: #636366; --line: rgba(255,255,255,.08); --line-strong: rgba(255,255,255,.16);
+  --accent: #0a84ff; --charge: #32d74b; --drain: #ffb340; --screen: #bf5af2; --chip: #40c8e0;
+  --system: #0a84ff; --shadow: 0 0 0 .5px rgba(255,255,255,.08);
+  --seg-bg: rgba(255,255,255,.08); --seg-on: #636366; --danger: #ff6961;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none;
+  overflow: hidden;
+}
+.num { font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; }
+
+/* ── top bar ─────────────────────────────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: 1fr auto 1fr;
+  align-items: center; gap: 12px; padding: 12px 20px; background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .status { color: var(--muted); display: flex; align-items: center; gap: 8px; min-width: 0; }
+.topbar .status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.dot.charge { background: var(--charge); } .dot.drain { background: var(--drain); } .dot.idle { background: var(--accent); }
+.seg { display: inline-flex; background: var(--seg-bg); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg button {
+  border: 0; background: transparent; padding: 4px 14px; border-radius: 6px; cursor: default;
+  color: var(--text); font-weight: 500;
+}
+.seg button[aria-selected="true"] { background: var(--seg-on); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.seg.small button { padding: 2px 10px; font-size: 12px; font-weight: 400; }
+
+main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
+.page { display: none; max-width: 1100px; margin: 0 auto; }
+.page.active { display: block; }
+.grid { display: grid; gap: 14px; }
+.card {
+  background: var(--card); border-radius: 12px; box-shadow: var(--shadow); padding: 16px 18px;
+  min-width: 0;
+}
+.card h2 {
+  margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--muted);
+  text-transform: uppercase; display: flex; align-items: center; gap: 10px;
+}
+.card h2 .spacer { flex: 1; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+
+/* ── hero ────────────────────────────────────── */
+.hero { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 22px; }
+.level { font-size: 44px; font-weight: 600; letter-spacing: -.02em; line-height: 1; }
+.level small { font-size: 22px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.hero .state { font-size: 15px; font-weight: 500; }
+.hero .sub { color: var(--muted); margin-top: 3px; }
+.gauge { height: 8px; border-radius: 4px; background: var(--seg-bg); overflow: hidden; margin-top: 10px; max-width: 420px; }
+.gauge > div { height: 100%; width: 0; background: var(--drain); border-radius: 4px; transition: width .6s ease; }
+.gauge.charge > div { background: var(--charge); }
+.gauge.idle > div { background: var(--accent); }
+.chip {
+  display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 12px;
+  border-radius: 10px; background: var(--card-2); box-shadow: inset 0 0 0 .5px var(--line-strong);
+  max-width: 320px; text-align: right;
+}
+.chip b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* ── flow ────────────────────────────────────── */
+.flow { display: grid; grid-template-columns: 1fr 1.4fr 1fr 1.4fr 1fr; align-items: center; gap: 0; padding: 6px 0 2px; }
+.node {
+  background: var(--card-2); border-radius: 12px; padding: 12px; text-align: center;
+  box-shadow: inset 0 0 0 .5px var(--line-strong); transition: opacity .3s;
+}
+.node.off { opacity: .4; }
+.node .icon { font-size: 22px; line-height: 1; height: 26px; }
+.node .name { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.node .val { font-size: 20px; font-weight: 600; margin-top: 2px; }
+.node .extra { color: var(--muted); font-size: 11px; margin-top: 2px; min-height: 15px; }
+.link { position: relative; height: 56px; display: flex; flex-direction: column; justify-content: center; }
+.link .label { text-align: center; font-weight: 600; font-size: 13px; min-height: 18px; }
+.link .note { text-align: center; font-size: 11px; color: var(--muted); min-height: 15px; }
+.pipe {
+  height: 4px; margin: 4px 6px; border-radius: 3px; background: var(--seg-bg); position: relative; overflow: hidden;
+  transition: height .4s ease;
+}
+.pipe::after {
+  content: ""; position: absolute; inset: 0; opacity: 0;
+  background: repeating-linear-gradient(90deg, var(--pipe-color) 0 12px, transparent 12px 20px);
+  background-size: 20px 100%;
+}
+.pipe.on::after { opacity: 1; animation: flow 0.9s linear infinite; }
+.pipe.rev::after { animation-direction: reverse; }
+@keyframes flow { from { background-position: 0 0; } to { background-position: 20px 0; } }
+@media (prefers-reduced-motion: reduce) { .pipe.on::after { animation: none; } }
+
+.breakdown { margin-top: 14px; }
+.stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--seg-bg); }
+.stack > div { height: 100%; transition: width .5s ease; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+.legend b { color: var(--text); font-weight: 500; margin-left: 4px; }
+
+/* ── chart ───────────────────────────────────── */
+.chart-wrap { position: relative; height: 220px; }
+.chart-wrap.short { height: 150px; }
+.chart-wrap canvas { width: 100%; height: 100%; display: block; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--card); color: var(--text); padding: 7px 9px;
+  border-radius: 8px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.18), 0 0 0 .5px var(--line-strong);
+  display: none; white-space: nowrap; z-index: 2;
+}
+.tip .row { display: flex; align-items: center; gap: 6px; }
+.tip .row i { width: 8px; height: 8px; border-radius: 2px; }
+.tip .row b { margin-left: auto; padding-left: 14px; font-weight: 600; }
+.toggles { display: flex; gap: 6px; flex-wrap: wrap; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.toggle {
+  border: 0; border-radius: 12px; padding: 2px 9px 2px 7px; background: var(--seg-bg); color: var(--muted);
+  font-size: 12px; display: inline-flex; align-items: center; gap: 5px;
+}
+.toggle i { width: 8px; height: 8px; border-radius: 50%; opacity: .35; }
+.toggle.on { color: var(--text); } .toggle.on i { opacity: 1; }
+
+/* ── details ─────────────────────────────────── */
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.kv { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; column-gap: 12px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; text-align: right; font-weight: 500; }
+.health { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.health .big { font-size: 26px; font-weight: 600; }
+
+/* ── history ─────────────────────────────────── */
+.history { display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start; }
+.list { padding: 6px; max-height: calc(100vh - 150px); overflow-y: auto; }
+.session {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 9px 10px; border-radius: 8px;
+  cursor: default;
+}
+.session:hover { background: var(--seg-bg); }
+.session.sel { background: var(--accent); color: #fff; }
+.session.sel .muted, .session.sel .faint { color: rgba(255,255,255,.8); }
+.session .when { font-weight: 500; }
+.session .levels { text-align: right; font-weight: 600; }
+.session .meta { grid-column: 1 / -1; font-size: 12px; display: flex; gap: 8px; min-width: 0; }
+.session .meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--seg-bg); position: relative; margin: 3px 0 1px; }
+.bar > div { position: absolute; top: 0; bottom: 0; background: var(--charge); border-radius: 2px; }
+.session.sel .bar { background: rgba(255,255,255,.3); } .session.sel .bar > div { background: #fff; }
+.list-head { padding: 8px 10px 6px; display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.stat { background: var(--card-2); border-radius: 10px; padding: 10px 12px; box-shadow: inset 0 0 0 .5px var(--line); }
+.stat .k { color: var(--muted); font-size: 12px; }
+.stat .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
+table.ap { width: 100%; border-collapse: collapse; margin-top: 12px; }
+table.ap th, table.ap td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+table.ap th:first-child, table.ap td:first-child { text-align: left; }
+table.ap th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.actions { display: flex; gap: 8px; }
+.btn {
+  border: 0; border-radius: 7px; padding: 5px 12px; background: var(--seg-bg); color: var(--text); font-weight: 500;
+}
+.btn:hover { filter: brightness(.96); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.danger { color: var(--danger); }
+
+/* ── settings ────────────────────────────────── */
+.settings { max-width: 680px; margin: 0 auto; }
+.group { margin-bottom: 18px; }
+.group > h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px 4px; }
+.group .card { padding: 0 16px; }
+.srow { display: flex; align-items: center; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.srow:last-child { border-bottom: 0; }
+.srow .lbl { flex: 1; }
+.srow .lbl .hint { color: var(--muted); font-size: 12px; margin-top: 1px; }
+select {
+  font: inherit; color: var(--text); background: var(--seg-bg); border: 0; border-radius: 6px;
+  padding: 4px 26px 4px 9px; -webkit-appearance: none; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 55%, calc(100% - 9px) 55%; background-size: 4px 4px; background-repeat: no-repeat;
+}
+.switch { position: relative; width: 38px; height: 22px; flex: none; }
+.switch input { opacity: 0; position: absolute; inset: 0; margin: 0; }
+.switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--seg-bg); transition: background .2s; pointer-events: none; box-shadow: inset 0 0 0 .5px var(--line-strong); }
+.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .2s; }
+.switch input:checked + span { background: var(--charge); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+ul.privacy { margin: 0; padding: 12px 0 12px 18px; }
+ul.privacy li { margin: 4px 0; }
+code { font: 12px ui-monospace, "SF Mono", Menlo, monospace; background: var(--seg-bg); padding: 1px 5px; border-radius: 4px; user-select: text; -webkit-user-select: text; }
+
+dialog {
+  border: 0; border-radius: 12px; padding: 20px; background: var(--card); color: var(--text); width: 340px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.35), 0 0 0 .5px var(--line-strong);
+}
+dialog::backdrop { background: rgba(0,0,0,.25); }
+dialog h3 { margin: 0 0 6px; font-size: 14px; }
+dialog p { margin: 0 0 16px; color: var(--muted); }
+dialog .actions { justify-content: flex-end; }
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); opacity: 0;
+  background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; transition: all .25s;
+  pointer-events: none; z-index: 10;
+}
+.toast.show { opacity: 1; transform: translateX(-50%); }
+
+@media (max-width: 980px) {
+  .cols-3 { grid-template-columns: 1fr 1fr; }
+  .history { grid-template-columns: 290px 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="status"><i class="dot" id="top-dot"></i><span id="top-status">Reading sensors…</span></div>
+  <div class="seg" role="tablist" id="tabs">
+    <button role="tab" data-tab="now" aria-selected="true">Now</button>
+    <button role="tab" data-tab="history" aria-selected="false">History</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  </div>
+</div>
+
+<main id="main">
+  <!-- ── Now ── -->
+  <section class="page active" id="page-now">
+    <div class="grid">
+      <div class="card hero" id="hero">
+        <div class="level num" id="hero-level">—</div>
+        <div>
+          <div class="state" id="hero-state">—</div>
+          <div class="sub" id="hero-sub"></div>
+          <div class="gauge" id="hero-gauge"><div></div></div>
+        </div>
+        <div class="chip" id="hero-chip"><span class="muted">Power source</span><b>—</b></div>
+      </div>
+
+      <div class="card">
+        <h2>Power flow</h2>
+        <div class="flow">
+          <div class="node" id="n-adapter">
+            <div class="icon">🔌</div><div class="name">Adapter</div>
+            <div class="val num" id="n-adapter-val">—</div><div class="extra num" id="n-adapter-extra"></div>
+          </div>
+          <div class="link">
+            <div class="label num" id="l-in">&nbsp;</div>
+            <div class="pipe" id="p-in" style="--pipe-color: var(--charge)"></div>
+            <div class="note num" id="l-in-note"></div>
+          </div>
+          <div class="node" id="n-mac">
+            <div class="icon">💻</div><div class="name">Mac</div>
+            <div class="val num" id="n-mac-val">—</div><div class="extra">system load</div>
+          </div>
+          <div class="link">
+            <div class="label num" id="l-batt">&nbsp;</div>
+            <div class="pipe" id="p-batt" style="--pipe-color: var(--charge)"></div>
+            <div class="note" id="l-batt-note"></div>
+          </div>
+          <div class="node" id="n-battery">
+            <div class="icon">🔋</div><div class="name">Battery</div>
+            <div class="val num" id="n-battery-val">—</div><div class="extra num" id="n-battery-extra"></div>
+          </div>
+        </div>
+        <div class="breakdown" id="breakdown">
+          <div class="stack" id="stack"></div>
+          <div class="legend num" id="stack-legend"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Live power
+          <span class="toggles" id="live-toggles"></span>
+          <span class="spacer"></span>
+          <span class="seg small" id="live-range">
+            <button data-range="60" aria-selected="false">1m</button>
+            <button data-range="300" aria-selected="true">5m</button>
+            <button data-range="900" aria-selected="false">15m</button>
+          </span>
+        </h2>
+        <div class="chart-wrap"><canvas id="live-chart"></canvas><div class="tip" id="live-tip"></div></div>
+      </div>
+
+      <div class="grid cols-3">
+        <div class="card">
+          <h2>Battery</h2>
+          <div class="health"><span class="big num" id="d-health">—</span><span class="muted">maximum capacity</span></div>
+          <dl class="kv num" id="d-battery"></dl>
+        </div>
+        <div class="card">
+          <h2>Adapter</h2>
+          <dl class="kv num" id="d-adapter"></dl>
+        </div>
+        <div class="card">
+          <h2>System</h2>
+          <dl class="kv num" id="d-system"></dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── History ── -->
+  <section class="page" id="page-history">
+    <div class="history">
+      <div class="card list" id="session-list"></div>
+      <div class="card" id="session-detail"><div class="empty">Select a charging session.</div></div>
+    </div>
+  </section>
+
+  <!-- ── Settings ── -->
+  <section class="page" id="page-settings">
+    <div class="settings">
+      <div class="group">
+        <h3>Menu bar</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Show in menu bar</div>
+            <select id="s-metric">
+              <option value="system">System power</option>
+              <option value="screen">Screen power</option>
+              <option value="chip">Chip power (CPU + GPU)</option>
+            </select>
+          </div>
+          <div class="srow">
+            <div class="lbl">Show adapter input while charging<div class="hint">Displays a ⚡︎ and the watts coming from the charger.</div></div>
+            <label class="switch"><input type="checkbox" id="s-show-charging"><span></span></label>
+          </div>
+          <div class="srow">
+            <div class="lbl">Update every</div>
+            <select id="s-interval">
+              <option value="500">0.5 seconds</option>
+              <option value="1000">1 second</option>
+              <option value="2000">2 seconds</option>
+              <option value="5000">5 seconds</option>
+              <option value="10000">10 seconds</option>
+              <option value="30000">30 seconds</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>General</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Appearance</div>
+            <div class="seg small" id="s-theme">
+              <button data-theme="system">System</button>
+              <button data-theme="light">Light</button>
+              <button data-theme="dark">Dark</button>
+            </div>
+          </div>
+          <div class="srow">
+            <div class="lbl">Open this window at launch<div class="hint">Off keeps Pythonflow in the menu bar only. To start at login, add Pythonflow in System Settings → General → Login Items.</div></div>
+            <label class="switch"><input type="checkbox" id="s-open-at-launch"><span></span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>History</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Record charging sessions<div class="hint">Level, duration and power readings for each charge, kept on this Mac.</div></div>
+            <label class="switch"><input type="checkbox" id="s-record"><span></span></label>
+          </div>
+          <div class="srow">
+            <div class="lbl">Delete all charging history<div class="hint" id="s-history-count"></div></div>
+            <button class="btn danger" id="s-clear">Delete All…</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Privacy</h3>
+        <div class="card">
+          <ul class="privacy">
+            <li>Pythonflow never connects to the internet: no update checks, analytics, or crash reporting, and no local server or open ports.</li>
+            <li>It only reads power sensors (the battery registry and SMC). It doesn't read serial numbers or your computer's name.</li>
+            <li>Charging history and settings stay in <code id="s-data-dir">~/Library/Application Support/Pythonflow</code>.</li>
+          </ul>
+          <div class="srow"><div class="lbl muted">Log file: <code id="s-log-path"></code></div><button class="btn" id="s-reveal">Show in Finder</button></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>About</h3>
+        <div class="card">
+          <div class="srow"><div class="lbl">Version</div><div class="muted num" id="s-version"></div></div>
+          <div class="srow"><div class="lbl muted"><b>Pythonflow</b> is a Python rewrite of Powerflow by Samuel Lyon (lzt1008), with the macOS 27 fixes. MIT License.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="confirm">
+  <h3 id="confirm-title"></h3>
+  <p id="confirm-body"></p>
+  <div class="actions"><button class="btn" value="cancel" id="confirm-cancel">Cancel</button><button class="btn primary" id="confirm-ok">OK</button></div>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── helpers ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const api = () => window.pywebview.api;
+const isNum = v => typeof v === 'number' && isFinite(v);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtW = (v, d = 1) => isNum(v) ? `${v.toFixed(d)} W` : '—';
+const fmtNum = (v, unit = '', d = 0) => isNum(v) ? `${v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })}${unit}` : '—';
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function fmtDuration(minutes) {
+  if (!isNum(minutes)) return '—';
+  const h = Math.floor(minutes / 60), m = Math.round(minutes % 60);
+  if (h === 0) return `${m} min`;
+  return m ? `${h} hr ${m} min` : `${h} hr`;
+}
+function fmtClock(t) { return new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+function fmtDay(t) {
+  return new Date(t * 1000).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+function confirmDialog(title, body, okLabel) {
+  return new Promise(resolve => {
+    const d = $('confirm');
+    $('confirm-title').textContent = title; $('confirm-body').textContent = body; $('confirm-ok').textContent = okLabel;
+    const done = v => { d.close(); $('confirm-ok').onclick = $('confirm-cancel').onclick = null; resolve(v); };
+    $('confirm-ok').onclick = () => done(true);
+    $('confirm-cancel').onclick = () => done(false);
+    d.oncancel = () => resolve(false);
+    d.showModal();
+  });
+}
+
+async function call(name, ...args) {
+  try { return await api()[name](...args); }
+  catch (e) { console.error(name, e); toast(`Something went wrong (${name})`); throw e; }
+}
+
+// ── chart (hand-rolled canvas, no library) ──────────────
+const charts = new Map();
+function drawChart(canvas, opts) {
+  const state = charts.get(canvas) || { hoverX: null };
+  state.opts = opts; charts.set(canvas, state);
+  if (!state.bound) {
+    state.bound = true;
+    canvas.addEventListener('mousemove', e => { state.hoverX = e.offsetX; drawChart(canvas, state.opts); });
+    canvas.addEventListener('mouseleave', () => { state.hoverX = null; drawChart(canvas, state.opts); });
+  }
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if (!W || !H) return;
+  if (canvas.width !== W * dpr || canvas.height !== H * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const { xs, series, xMin, xMax, unit = 'W', yFixed, xLabel } = opts;
+  const visible = series.filter(s => s.visible !== false);
+  const pad = { l: 44, r: 12, t: 8, b: 22 };
+  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+
+  let yMin = 0, yMax = 1;
+  if (yFixed) [yMin, yMax] = yFixed;
+  else {
+    for (const s of visible) for (const v of s.values) if (isNum(v)) { yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); }
+    const step = niceStep((yMax - yMin) / 4);
+    yMax = Math.ceil(yMax / step) * step; yMin = Math.floor(yMin / step) * step;
+    if (yMax === yMin) yMax = yMin + step;
+  }
+  const x = t => pad.l + (xMax === xMin ? 0 : (t - xMin) / (xMax - xMin) * pw);
+  const y = v => pad.t + (1 - (v - yMin) / (yMax - yMin)) * ph;
+
+  // grid + axis labels
+  ctx.font = '11px -apple-system, sans-serif'; ctx.fillStyle = css('--faint'); ctx.strokeStyle = css('--line');
+  ctx.lineWidth = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  const ystep = yFixed ? (yMax - yMin) / 4 : niceStep((yMax - yMin) / 4);
+  for (let v = yMin; v <= yMax + 1e-9; v += ystep) {
+    const yy = Math.round(y(v)) + .5;
+    ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke();
+    ctx.fillText(`${+v.toFixed(1)}${unit === '%' ? '%' : ''}`, pad.l - 6, yy);
+  }
+  if (yMin < 0 && yMax > 0) {
+    ctx.strokeStyle = css('--line-strong'); const yy = Math.round(y(0)) + .5;
+    ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke();
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const nx = opts.xTicks || 4;
+  for (let i = 0; i <= nx; i++) {
+    const t = xMin + (xMax - xMin) * i / nx;
+    ctx.textAlign = i === 0 ? 'left' : i === nx ? 'right' : 'center';
+    ctx.fillText(xLabel(t), x(t), H - pad.b + 6);
+  }
+
+  // series
+  for (const s of visible) {
+    ctx.beginPath(); let started = false;
+    s.values.forEach((v, i) => {
+      if (!isNum(v) || xs[i] < xMin) { started = false; return; }
+      const px = x(xs[i]), py = y(v);
+      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+    });
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.75; ctx.lineJoin = 'round'; ctx.stroke();
+    if (s.fill) {
+      ctx.lineTo(x(xs[xs.length - 1]), y(Math.max(yMin, 0))); ctx.lineTo(x(Math.max(xs[0], xMin)), y(Math.max(yMin, 0)));
+      ctx.closePath(); ctx.globalAlpha = .12; ctx.fillStyle = s.color; ctx.fill(); ctx.globalAlpha = 1;
+    }
+  }
+
+  // hover crosshair + tooltip
+  const tip = opts.tip;
+  if (state.hoverX == null || !xs.length || state.hoverX < pad.l || state.hoverX > W - pad.r) { if (tip) tip.style.display = 'none'; return; }
+  const tHover = xMin + (state.hoverX - pad.l) / pw * (xMax - xMin);
+  let idx = 0, best = Infinity;
+  xs.forEach((t, i) => { const d = Math.abs(t - tHover); if (d < best) { best = d; idx = i; } });
+  const hx = Math.round(x(xs[idx])) + .5;
+  ctx.strokeStyle = css('--line-strong'); ctx.beginPath(); ctx.moveTo(hx, pad.t); ctx.lineTo(hx, H - pad.b); ctx.stroke();
+  for (const s of visible) {
+    const v = s.values[idx]; if (!isNum(v)) continue;
+    ctx.beginPath(); ctx.arc(hx, y(v), 3.5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill();
+  }
+  if (tip) {
+    tip.innerHTML = `<div class="faint" style="margin-bottom:3px">${esc(opts.tipTitle(xs[idx]))}</div>` +
+      visible.map(s => `<div class="row"><i style="background:${s.color}"></i>${esc(s.name)}<b class="num">${esc(s.format(s.values[idx]))}</b></div>`).join('');
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth;
+    tip.style.left = `${hx + 12 + tw > W ? hx - tw - 12 : hx + 12}px`; tip.style.top = `${pad.t + 4}px`;
+  }
+}
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+}
+
+// ── state ───────────────────────────────────────────────
+let settings = null, latest = null, seq = 0, points = [], pollTimer = null;
+let liveRange = 300, activeTab = 'now', sessions = [], selectedId = null;
+const SERIES = [
+  { key: 'system_load', name: 'System', color: '--system', on: true },
+  { key: 'system_in', name: 'Adapter in', color: '--charge', on: true },
+  { key: 'battery_power', name: 'Battery', color: '--drain', on: true },
+  { key: 'screen_power', name: 'Screen', color: '--screen', on: false },
+  { key: 'chip_power', name: 'Chip', color: '--chip', on: false },
+];
+let pointFields = ['t', 'system_load', 'system_in', 'battery_power', 'screen_power', 'chip_power'];
+
+// ── Now page ────────────────────────────────────────────
+function statusOf(s) {
+  if (!s) return { dot: '', text: 'Reading sensors…' };
+  if (!s.has_battery) return { dot: 'idle', text: s.external_connected ? 'On power adapter' : 'Desktop Mac' };
+  const t = s.time_remaining_min;
+  if (s.fully_charged) return { dot: 'idle', text: 'Fully charged' };
+  if (s.is_charging) return { dot: 'charge', text: isNum(t) ? `Charging · ${fmtDuration(t)} to full` : 'Charging · calculating…' };
+  if (s.external_connected) return { dot: 'idle', text: 'Plugged in, not charging' };
+  return { dot: 'drain', text: isNum(t) ? `On battery · ${fmtDuration(t)} remaining` : 'On battery · calculating…' };
+}
+
+function renderNow() {
+  const s = latest; if (!s) return;
+  const st = statusOf(s);
+  $('top-dot').className = `dot ${st.dot}`; $('top-status').textContent = st.text;
+
+  // hero
+  const lvl = s.battery_level;
+  $('hero-level').innerHTML = isNum(lvl) ? `${lvl}<small>%</small>` : '—';
+  $('hero-state').textContent = st.text.split(' · ')[0];
+  $('hero-sub').textContent = st.text.includes(' · ') ? st.text.split(' · ')[1] : (s.has_battery ? '' : 'No internal battery');
+  $('hero-gauge').className = `gauge ${st.dot}`;
+  $('hero-gauge').firstElementChild.style.width = `${isNum(lvl) ? lvl : 0}%`;
+  $('hero-gauge').style.display = s.has_battery ? '' : 'none';
+  const a = s.adapter;
+  $('hero-chip').innerHTML = s.external_connected
+    ? `<span class="muted">Power source</span><b>${esc(a?.name || 'Power adapter')}</b><span class="muted num">${[a?.voltage && `${a.voltage} V`, a?.current && `${a.current} A`].filter(Boolean).join(' · ') || '&nbsp;'}</span>`
+    : `<span class="muted">Power source</span><b>Battery</b><span class="muted num">${isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '&nbsp;'}</span>`;
+
+  // flow
+  const inW = s.external_connected ? s.adapter_power : null;
+  const bp = s.battery_power;
+  $('n-adapter').classList.toggle('off', !s.external_connected);
+  $('n-adapter-val').textContent = s.external_connected ? fmtW(inW) : 'Unplugged';
+  $('n-adapter-extra').textContent = a?.watts ? `${a.watts} W rated` : '';
+  $('n-mac-val').textContent = fmtW(s.system_load);
+  $('n-battery').classList.toggle('off', !s.has_battery);
+  $('n-battery-val').textContent = isNum(lvl) ? `${lvl}%` : '—';
+  $('n-battery-extra').textContent = isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '';
+
+  setPipe('p-in', s.external_connected ? s.system_in : 0, false, '--charge');
+  $('l-in').textContent = s.external_connected ? fmtW(s.system_in) : ' ';
+  $('l-in-note').textContent = s.external_connected && s.efficiency_loss > 0.05 ? `${fmtW(s.efficiency_loss)} conversion loss` : '';
+
+  const charging = isNum(bp) && bp > 0.05, draining = isNum(bp) && bp < -0.05;
+  setPipe('p-batt', isNum(bp) ? Math.abs(bp) : 0, draining, draining ? '--drain' : '--charge');
+  $('l-batt').textContent = charging || draining ? fmtW(Math.abs(bp)) : ' ';
+  $('l-batt-note').textContent = charging ? 'charging' : draining ? 'from battery' : (s.has_battery ? 'idle' : '');
+
+  // breakdown of system load
+  const screen = s.screen_power, chip = s.chip_power, total = s.system_load;
+  const hasParts = isNum(total) && total > 0 && (isNum(screen) || isNum(chip));
+  $('breakdown').style.display = hasParts ? '' : 'none';
+  if (hasParts) {
+    const other = Math.max(0, total - (screen || 0) - (chip || 0));
+    const parts = [
+      ['Screen', screen, '--screen', 'Display backlight (SMC sensor PDBR). On mini-LED screens this rises with bright content.'],
+      ['Chip (CPU + GPU)', chip, '--chip', 'Apple silicon package: CPU, GPU and other on-chip blocks (SMC sensor PHPC, which Apple names after the heatpipe that cools it). Fans are not included.'],
+      ['Everything else', other, '--system', 'Memory, storage, Wi-Fi, fans, speakers and other components.'],
+    ].filter(p => isNum(p[1]));
+    const sum = parts.reduce((acc, p) => acc + Math.max(0, p[1]), 0) || 1;
+    $('stack').innerHTML = parts.map(p => `<div title="${esc(p[3])}" style="width:${Math.max(0, p[1]) / sum * 100}%;background:var(${p[2]})"></div>`).join('');
+    $('stack-legend').innerHTML = parts.map(p => `<span title="${esc(p[3])}"><i style="background:var(${p[2]})"></i>${esc(p[0])}<b>${fmtW(p[1])}</b></span>`).join('');
+  }
+
+  // details
+  $('d-health').textContent = isNum(s.health_pct) ? `${Math.min(100, s.health_pct).toFixed(1)}%` : '—';
+  kv('d-battery', [
+    ['Cycle count', fmtNum(s.cycle_count)],
+    ['Charge', s.current_capacity && s.max_capacity ? `${fmtNum(s.current_capacity)} / ${fmtNum(s.max_capacity)} mAh` : '—'],
+    ['Design capacity', fmtNum(s.design_capacity, ' mAh')],
+    ['Temperature', fmtNum(s.temperature, ' °C', 1)],
+    ['Voltage', fmtNum(s.voltage, ' V', 2)],
+    ['Current', fmtNum(s.amperage, ' A', 2)],
+  ]);
+  kv('d-adapter', s.external_connected ? [
+    ['Name', a?.name || '—'],
+    ['Rated', fmtNum(a?.watts, ' W')],
+    ['Negotiated', a?.voltage ? `${fmtNum(a.voltage, ' V', 1)} · ${fmtNum(a.current, ' A', 2)}` : '—'],
+    ['Drawing now', fmtW(s.adapter_power)],
+    ['Conversion loss', fmtW(s.efficiency_loss, 2)],
+    ['Wireless', a?.wireless ? 'Yes' : 'No'],
+  ] : [['Status', 'Not connected']]);
+  kv('d-system', [
+    ['Total', fmtW(s.system_load)],
+    ['Screen', fmtW(s.screen_power)],
+    ['Chip (CPU + GPU)', fmtW(s.chip_power)],
+    ['Into Mac from adapter', s.external_connected ? fmtW(s.system_in) : '—'],
+    ['Battery', isNum(bp) ? `${bp > 0 ? '+' : ''}${bp.toFixed(1)} W` : '—'],
+    ['Sensors', s.has_smc ? 'SMC + battery registry' : 'Battery registry only'],
+  ]);
+}
+
+function setPipe(id, watts, reverse, colorVar) {
+  const el = $(id), w = isNum(watts) ? watts : 0;
+  el.classList.toggle('on', w > 0.05); el.classList.toggle('rev', !!reverse);
+  el.style.setProperty('--pipe-color', `var(${colorVar})`);
+  el.style.height = `${Math.min(8, 3 + Math.log2(1 + w) * 0.75)}px`;
+}
+
+function kv(id, rows) {
+  $(id).innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+}
+
+function renderToggles() {
+  $('live-toggles').innerHTML = SERIES.map((s, i) =>
+    `<button class="toggle ${s.on ? 'on' : ''}" data-i="${i}"><i style="background:var(${s.color})"></i>${esc(s.name)}</button>`).join('');
+}
+$('live-toggles').addEventListener('click', e => {
+  const b = e.target.closest('.toggle'); if (!b) return;
+  SERIES[+b.dataset.i].on = !SERIES[+b.dataset.i].on; renderToggles(); renderLiveChart();
+});
+$('live-range').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  liveRange = +b.dataset.range;
+  for (const el of $('live-range').children) el.setAttribute('aria-selected', el === b);
+  renderLiveChart();
+});
+
+function renderLiveChart() {
+  if (activeTab !== 'now' || !points.length) return;
+  const tIdx = pointFields.indexOf('t');
+  const xMax = points[points.length - 1][tIdx], xMin = xMax - liveRange;
+  const view = points.filter(p => p[tIdx] >= xMin - 5);
+  drawChart($('live-chart'), {
+    xs: view.map(p => p[tIdx]), xMin, xMax, unit: 'W', tip: $('live-tip'),
+    xTicks: liveRange === 60 ? 4 : 5,
+    xLabel: t => {
+      const ago = Math.round(xMax - t), m = Math.floor(ago / 60), s = ago % 60;
+      return ago === 0 ? 'now' : m ? (s ? `-${m}m ${s}s` : `-${m}m`) : `-${s}s`;
+    },
+    tipTitle: t => new Date(t * 1000).toLocaleTimeString(),
+    series: SERIES.map(s => ({
+      name: s.name, color: css(s.color), visible: s.on, format: v => fmtW(v),
+      values: view.map(p => p[pointFields.indexOf(s.key)]),
+    })),
+  });
+}
+
+// ── polling ─────────────────────────────────────────────
+let polling = false;
+async function poll() {
+  clearTimeout(pollTimer);
+  // One request at a time: overlapping polls (page ready + window shown both
+  // trigger one) would ask for the same `seq` and append the points twice.
+  if (polling) return;
+  polling = true;
+  try {
+    if (document.visibilityState === 'visible') {
+      const r = await api().get_live(seq);
+      if (r.point_fields) pointFields = r.point_fields;
+      const tIdx = pointFields.indexOf('t');
+      const lastT = points.length ? points[points.length - 1][tIdx] : -Infinity;
+      const fresh = r.points.filter(p => p[tIdx] > lastT);
+      if (fresh.length) {
+        points.push(...fresh);
+        const cutoff = points[points.length - 1][tIdx] - 900;
+        const firstKeep = points.findIndex(p => p[tIdx] >= cutoff);
+        if (firstKeep > 0) points.splice(0, firstKeep);
+      }
+      seq = r.seq;
+      if (r.latest) { latest = r.latest; renderNow(); renderLiveChart(); }
+    }
+  } catch (e) { console.error(e); }
+  polling = false;
+  pollTimer = setTimeout(poll, Math.max(500, settings?.update_interval_ms || 2000));
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
+window.addEventListener('resize', () => { renderLiveChart(); if (activeTab === 'history') renderDetailCharts(); });
+
+// ── tabs ────────────────────────────────────────────────
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  activeTab = b.dataset.tab;
+  for (const el of $('tabs').children) el.setAttribute('aria-selected', el === b);
+  for (const p of document.querySelectorAll('.page')) p.classList.toggle('active', p.id === `page-${activeTab}`);
+  $('main').scrollTop = 0;
+  if (activeTab === 'now') renderLiveChart();
+  if (activeTab === 'history') loadSessions();
+  if (activeTab === 'settings') renderSettings();
+});
+
+// ── History page ────────────────────────────────────────
+async function loadSessions() {
+  sessions = await call('list_sessions');
+  renderSessionList();
+  if (selectedId == null && sessions.length) selectSession(sessions[0].id);
+  else if (selectedId != null && !sessions.some(s => s.id === selectedId)) {
+    selectedId = null; $('session-detail').innerHTML = '<div class="empty">Select a charging session.</div>';
+  }
+}
+
+function renderSessionList() {
+  const el = $('session-list');
+  if (!sessions.length) {
+    const off = settings && !settings.record_history;
+    el.innerHTML = `<div class="empty">${off
+      ? 'History recording is off. Turn it on in Settings to keep a record of each charge.'
+      : 'No charging sessions yet.<br>They’re recorded automatically each time your Mac charges.'}</div>`;
+    $('session-detail').innerHTML = '';
+    return;
+  }
+  el.innerHTML = `<div class="list-head"><span>${sessions.length} session${sessions.length === 1 ? '' : 's'}</span><span>Newest first</span></div>` +
+    sessions.map(s => {
+      const mins = (s.ended_at - s.started_at) / 60;
+      return `<div class="session ${s.id === selectedId ? 'sel' : ''}" data-id="${s.id}">
+        <div class="when">${esc(fmtDay(s.started_at))} <span class="muted">${esc(fmtClock(s.started_at))}</span></div>
+        <div class="levels num">${s.from_level}% → ${s.to_level}%</div>
+        <div class="bar"><div style="left:${s.from_level}%;width:${Math.max(1, s.to_level - s.from_level)}%"></div></div>
+        <div class="meta muted num"><span>${esc(fmtDuration(mins))}</span><span class="faint">·</span><span>${esc(s.adapter_name || 'Unknown adapter')}</span></div>
+      </div>`;
+    }).join('');
+}
+$('session-list').addEventListener('click', e => {
+  const row = e.target.closest('.session'); if (row) selectSession(+row.dataset.id);
+});
+
+let detail = null;
+async function selectSession(id) {
+  selectedId = id; renderSessionList();
+  detail = await call('get_session', id);
+  if (!detail) return;
+  const d = detail, mins = (d.ended_at - d.started_at) / 60;
+  const gained = d.to_level - d.from_level;
+  const rows = [['Adapter input', 'adapter_power'], ['Into Mac', 'system_in'], ['System load', 'system_load'],
+    ['Into battery', 'battery_power'], ['Conversion loss', 'efficiency_loss'], ['Screen', 'screen_power'],
+    ['Chip (CPU + GPU)', 'chip_power'], ['Battery temp', 'temperature']]
+    .filter(([, k]) => isNum(d.avg[k]) || isNum(d.peak[k]));
+  $('session-detail').innerHTML = `
+    <h2>${esc(new Date(d.started_at * 1000).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }))}
+      <span class="spacer"></span>
+      <span class="actions"><button class="btn" id="h-export">Export CSV…</button><button class="btn danger" id="h-delete">Delete</button></span></h2>
+    <div class="stats num">
+      <div class="stat"><div class="k">Charged</div><div class="v">${d.from_level}% → ${d.to_level}%</div></div>
+      <div class="stat"><div class="k">Duration</div><div class="v">${esc(fmtDuration(mins))}</div></div>
+      <div class="stat"><div class="k">Rate</div><div class="v">${gained > 0 && mins > 0 ? `${(gained / mins * 60).toFixed(0)}%/hr` : '—'}</div></div>
+      <div class="stat"><div class="k">Adapter</div><div class="v" style="font-size:14px;line-height:22px">${esc(d.adapter_name || '—')}</div></div>
+    </div>
+    <h2>Battery level</h2>
+    <div class="chart-wrap short"><canvas id="h-level"></canvas><div class="tip" id="h-level-tip"></div></div>
+    <h2 style="margin-top:14px">Power<span class="legend" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400">
+      <span><i style="background:var(--charge)"></i>Into Mac</span><span><i style="background:var(--system)"></i>System</span><span><i style="background:var(--drain)"></i>Battery</span></span></h2>
+    <div class="chart-wrap short"><canvas id="h-power"></canvas><div class="tip" id="h-power-tip"></div></div>
+    <table class="ap num"><thead><tr><th></th><th>Average</th><th>Peak</th></tr></thead><tbody>
+      ${rows.map(([label, k]) => {
+        const f = k === 'temperature' ? v => fmtNum(v, ' °C', 1) : v => fmtW(v);
+        return `<tr><td>${esc(label)}</td><td>${esc(f(d.avg[k]))}</td><td>${esc(f(d.peak[k]))}</td></tr>`;
+      }).join('')}
+    </tbody></table>
+    ${d.source !== 'pythonflow' ? '<p class="faint" style="margin:10px 0 0">Imported from Powerflow 0.2. Older sessions logged about one point per minute.</p>' : ''}`;
+  $('h-export').onclick = async () => {
+    const path = await call('export_session_csv', d.id);
+    if (path) toast('Exported CSV');
+  };
+  $('h-delete').onclick = async () => {
+    if (!await confirmDialog('Delete this session?', 'This charging session will be permanently removed.', 'Delete')) return;
+    await call('delete_session', d.id);
+    selectedId = null; toast('Session deleted'); loadSessions();
+  };
+  renderDetailCharts();
+}
+
+function renderDetailCharts() {
+  const d = detail; if (!d || !$('h-level')) return;
+  const f = Object.fromEntries(d.curve_fields.map((k, i) => [k, i]));
+  const xs = d.curve.map(p => p[f.t]);
+  if (!xs.length) return;
+  const xMin = xs[0], xMax = xs[xs.length - 1];
+  const common = { xs, xMin, xMax, xLabel: t => fmtClock(t), tipTitle: t => new Date(t * 1000).toLocaleTimeString() };
+  drawChart($('h-level'), { ...common, unit: '%', yFixed: [0, 100], tip: $('h-level-tip'),
+    series: [{ name: 'Battery', color: css('--charge'), fill: true, format: v => isNum(v) ? `${v}%` : '—', values: d.curve.map(p => p[f.level]) }] });
+  drawChart($('h-power'), { ...common, unit: 'W', tip: $('h-power-tip'),
+    series: [
+      { name: 'Into Mac', color: css('--charge'), format: v => fmtW(v), values: d.curve.map(p => p[f.system_in]) },
+      { name: 'System', color: css('--system'), format: v => fmtW(v), values: d.curve.map(p => p[f.system_load]) },
+      { name: 'Battery', color: css('--drain'), format: v => fmtW(v), values: d.curve.map(p => p[f.battery_power]) },
+    ] });
+}
+
+// ── Settings page ───────────────────────────────────────
+function applyTheme() {
+  const t = settings?.theme || 'system';
+  if (t === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  renderLiveChart(); renderDetailCharts();
+}
+
+async function renderSettings() {
+  if (!settings) return;
+  $('s-metric').value = settings.menu_bar_metric;
+  $('s-show-charging').checked = settings.menu_bar_show_charging;
+  const iv = String(settings.update_interval_ms);
+  if (![...$('s-interval').options].some(o => o.value === iv)) $('s-interval').add(new Option(`${settings.update_interval_ms / 1000} seconds`, iv));
+  $('s-interval').value = iv;
+  for (const b of $('s-theme').children) b.setAttribute('aria-selected', b.dataset.theme === settings.theme);
+  $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
+  $('s-record').checked = settings.record_history;
+  const info = await call('app_info');
+  $('s-version').textContent = info.version;
+  $('s-data-dir').textContent = info.data_dir.replace(/^\/Users\/[^/]+/, '~');
+  $('s-log-path').textContent = info.log_path.replace(/^\/Users\/[^/]+/, '~');
+  const list = await call('list_sessions');
+  $('s-history-count').textContent = `${list.length} session${list.length === 1 ? '' : 's'} stored`;
+}
+
+async function save(changes) {
+  settings = await call('save_settings', changes);
+  applyTheme(); renderSettings();
+  poll();
+}
+$('s-metric').onchange = e => save({ menu_bar_metric: e.target.value });
+$('s-show-charging').onchange = e => save({ menu_bar_show_charging: e.target.checked });
+$('s-interval').onchange = e => save({ update_interval_ms: +e.target.value });
+$('s-open-at-launch').onchange = e => save({ open_dashboard_at_launch: e.target.checked });
+$('s-record').onchange = e => save({ record_history: e.target.checked });
+$('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
+$('s-reveal').onclick = () => call('reveal_data_folder');
+$('s-clear').onclick = async () => {
+  if (!await confirmDialog('Delete all charging history?', 'Every recorded charging session will be permanently removed from this Mac.', 'Delete All')) return;
+  const n = await call('clear_history');
+  selectedId = null; detail = null; toast(`Deleted ${n} session${n === 1 ? '' : 's'}`); renderSettings();
+};
+
+// ── boot ────────────────────────────────────────────────
+const reportError = msg => { try { api().log_error(msg); } catch (_) { /* bridge not ready */ } };
+window.addEventListener('error', e => reportError(`${e.message} (line ${e.lineno})`));
+window.addEventListener('unhandledrejection', e => reportError(`Unhandled: ${e.reason?.message || e.reason}`));
+
+window.addEventListener('pywebviewready', async () => {
+  settings = await call('get_settings');
+  applyTheme(); renderToggles();
+  poll();
+});
+</script>
+</body>
+</html>
