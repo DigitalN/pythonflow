@@ -1,16 +1,16 @@
-# Powerflow
+# Pythonflow
 
 ## Debugging
 
-Application logs are written to `~/Library/Logs/Powerflow/app.log` (rotating,
+Application logs are written to `~/Library/Logs/Pythonflow/app.log` (rotating,
 3 x 1 MB). Dashboard (JavaScript) errors are forwarded there too. When the user
 reports a bug, **read the log first** before asking questions.
 
-`app.log` is this app's log. `powerflow.log` in the same folder belongs to the
-old Rust version.
+`~/Library/Logs/Powerflow/` belongs to the original Rust app (`powerflow.log`)
+and to the first Python build, which ran under the old name.
 
 To reproduce without touching the user's data, run with
-`POWERFLOW_DATA_DIR=<tmp folder>` (logs then go to `<tmp folder>/Logs/`).
+`PYTHONFLOW_DATA_DIR=<tmp folder>` (logs then go to `<tmp folder>/Logs/`).
 
 ## Architecture
 
@@ -23,15 +23,16 @@ To reproduce without touching the user's data, run with
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). Main thread only.
 - **History**: `Application Files/history.py`. SQLite
-  (`~/Library/Application Support/Powerflow/history.db`), the `ChargingRecorder`
-  state machine, CSV export, and the one-time read-only import from the Rust
-  app's `db.sqlite`.
+  (`~/Library/Application Support/Pythonflow/history.db`), the `ChargingRecorder`
+  state machine, CSV export, and the one-time read-only import from the original
+  app's `~/Library/Application Support/Powerflow/db.sqlite`.
 - **Settings**: `Application Files/settings.py`. JSON, validated on every load and
   save.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
   hand-rolled canvas chart and no external resources.
-- **Build**: `Build Powerflow.command` runs PyInstaller with
-  `Application Files/Powerflow.spec`.
+- **Build**: `Build Pythonflow.command` runs PyInstaller with
+  `Application Files/Pythonflow.spec` and installs the result in
+  `/Applications/Pythonflow.app` (a self-contained bundle).
 
 ## Key rules
 

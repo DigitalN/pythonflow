@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-#  Powerflow — First Time Setup
+#  Pythonflow — First Time Setup
 #  Double-click this file to install what's needed and build the
 #  app. Only needs to be run once on a new machine.
 # ═══════════════════════════════════════════════════════════════
@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  Powerflow — First Time Setup"
+echo "  Pythonflow — First Time Setup"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
@@ -41,19 +41,21 @@ echo "  ✓ All packages installed"
 echo ""
 
 # ── 3. Build the app ─────────────────────────────────────────
-echo "→ Building Powerflow.app..."
+pkill -x Pythonflow 2>/dev/null || true
+echo "→ Building Pythonflow.app..."
 echo ""
 cd "$PROJECT_ROOT/Application Files"
-python3 -m PyInstaller Powerflow.spec --noconfirm --clean 2>&1 | tail -3
+python3 -m PyInstaller Pythonflow.spec --noconfirm --clean 2>&1 | tail -3
 echo ""
 
-if [ -d "dist/Powerflow.app" ]; then
-    rm -rf "$PROJECT_ROOT/Powerflow.app"
-    cp -R "dist/Powerflow.app" "$PROJECT_ROOT/Powerflow.app"
-    # iCloud-synced folders add Finder metadata that blocks codesign; clear it, then ad-hoc sign.
-    xattr -cr "$PROJECT_ROOT/Powerflow.app"
-    codesign --force --deep -s - "$PROJECT_ROOT/Powerflow.app" >/dev/null 2>&1 || echo "  (ad-hoc signing skipped)"
-    echo "  ✓ Powerflow.app built and ready"
+if [ -d "dist/Pythonflow.app" ]; then
+    rm -rf "/Applications/Pythonflow.app"
+    ditto "dist/Pythonflow.app" "/Applications/Pythonflow.app"
+    # Clear Finder/iCloud metadata picked up during the build (it blocks codesign), then ad-hoc sign.
+    xattr -cr "/Applications/Pythonflow.app"
+    codesign --force --deep -s - "/Applications/Pythonflow.app" >/dev/null 2>&1 || echo "  (ad-hoc signing skipped)"
+    rm -rf build dist
+    echo "  ✓ Pythonflow.app installed in /Applications"
 else
     echo "  ✗ Build failed — check output above"
     echo ""
@@ -67,17 +69,17 @@ echo ""
 echo "═══════════════════════════════════════════════════════════"
 echo "  ✓ Setup complete!"
 echo ""
-echo "  To launch: double-click 'Powerflow.app'"
-echo "  (Optional) drag it into /Applications and add it to"
-echo "  System Settings → General → Login Items to start at login."
-echo "  To rebuild after updates: double-click 'Build Powerflow.command'"
+echo "  To launch: open Pythonflow from Applications, Launchpad or Spotlight"
+echo "  (Optional) add it to System Settings → General → Login Items"
+echo "  to start it at login."
+echo "  To rebuild after updates: double-click 'Build Pythonflow.command'"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
-read -p "Launch Powerflow now? (y/n) " -n 1 answer
+read -p "Launch Pythonflow now? (y/n) " -n 1 answer
 echo ""
 if [[ "$answer" =~ ^[Yy]$ ]]; then
-    open "$PROJECT_ROOT/Powerflow.app"
+    open "/Applications/Pythonflow.app"
 fi
 
 osascript -e 'tell application "Terminal" to close front window' &>/dev/null &

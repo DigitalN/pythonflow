@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark">
-<title>Powerflow</title>
+<title>Pythonflow</title>
 <style>
 :root {
   --bg: #f5f5f7; --card: #ffffff; --card-2: #fafafa; --text: #1d1d1f; --muted: #6e6e73;
@@ -385,7 +385,7 @@ dialog .actions { justify-content: flex-end; }
             </div>
           </div>
           <div class="srow">
-            <div class="lbl">Open this window at launch<div class="hint">Off keeps Powerflow in the menu bar only. To start at login, add Powerflow in System Settings → General → Login Items.</div></div>
+            <div class="lbl">Open this window at launch<div class="hint">Off keeps Pythonflow in the menu bar only. To start at login, add Pythonflow in System Settings → General → Login Items.</div></div>
             <label class="switch"><input type="checkbox" id="s-open-at-launch"><span></span></label>
           </div>
         </div>
@@ -409,9 +409,9 @@ dialog .actions { justify-content: flex-end; }
         <h3>Privacy</h3>
         <div class="card">
           <ul class="privacy">
-            <li>Powerflow never connects to the internet: no update checks, analytics, or crash reporting, and no local server or open ports.</li>
+            <li>Pythonflow never connects to the internet: no update checks, analytics, or crash reporting, and no local server or open ports.</li>
             <li>It only reads power sensors (the battery registry and SMC). It doesn't read serial numbers or your computer's name.</li>
-            <li>Charging history and settings stay in <code id="s-data-dir">~/Library/Application Support/Powerflow</code>.</li>
+            <li>Charging history and settings stay in <code id="s-data-dir">~/Library/Application Support/Pythonflow</code>.</li>
           </ul>
           <div class="srow"><div class="lbl muted">Log file: <code id="s-log-path"></code></div><button class="btn" id="s-reveal">Show in Finder</button></div>
         </div>
@@ -421,7 +421,7 @@ dialog .actions { justify-content: flex-end; }
         <h3>About</h3>
         <div class="card">
           <div class="srow"><div class="lbl">Version</div><div class="muted num" id="s-version"></div></div>
-          <div class="srow"><div class="lbl muted">A Python rewrite of <b>Powerflow</b> by Samuel Lyon (lzt1008), with the macOS 27 fixes. MIT License.</div></div>
+          <div class="srow"><div class="lbl muted"><b>Pythonflow</b> is a Python rewrite of Powerflow by Samuel Lyon (lzt1008), with the macOS 27 fixes. MIT License.</div></div>
         </div>
       </div>
     </div>
@@ -839,7 +839,7 @@ async function selectSession(id) {
         return `<tr><td>${esc(label)}</td><td>${esc(f(d.avg[k]))}</td><td>${esc(f(d.peak[k]))}</td></tr>`;
       }).join('')}
     </tbody></table>
-    ${d.source !== 'powerflow' ? '<p class="faint" style="margin:10px 0 0">Imported from Powerflow 0.2. Older sessions logged about one point per minute.</p>' : ''}`;
+    ${d.source !== 'pythonflow' ? '<p class="faint" style="margin:10px 0 0">Imported from Powerflow 0.2. Older sessions logged about one point per minute.</p>' : ''}`;
   $('h-export').onclick = async () => {
     const path = await call('export_session_csv', d.id);
     if (path) toast('Exported CSV');

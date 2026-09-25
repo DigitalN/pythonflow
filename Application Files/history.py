@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS charging_sessions (
     avg_json      TEXT    NOT NULL DEFAULT '{}',
     peak_json     TEXT    NOT NULL DEFAULT '{}',
     curve_json    TEXT    NOT NULL DEFAULT '[]',
-    source        TEXT    NOT NULL DEFAULT 'powerflow'
+    source        TEXT    NOT NULL DEFAULT 'pythonflow'
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON charging_sessions(started_at);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -64,7 +64,7 @@ class HistoryStore:
         db.row_factory = sqlite3.Row
         return db
 
-    def save_session(self, session, source="powerflow"):
+    def save_session(self, session, source="pythonflow"):
         with self._lock, self._connect() as db:
             cur = db.execute(
                 "INSERT INTO charging_sessions (started_at, ended_at, from_level, to_level, adapter_name,"

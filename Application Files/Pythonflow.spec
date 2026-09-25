@@ -1,10 +1,10 @@
-# PyInstaller spec for Powerflow
+# PyInstaller spec for Pythonflow
 # Builds a menu-bar-only app (LSUIElement): no Dock icon until the dashboard is opened.
-# Data lives in ~/Library/Application Support/Powerflow, logs in ~/Library/Logs/Powerflow.
+# Data lives in ~/Library/Application Support/Pythonflow, logs in ~/Library/Logs/Pythonflow.
 
 import os
 
-ICON_PATH = os.path.join(SPECPATH, 'Powerflow.icns')
+ICON_PATH = os.path.join(SPECPATH, 'Pythonflow.icns')
 VERSION = '1.0.0'
 
 a = Analysis(
@@ -46,7 +46,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Powerflow',
+    name='Pythonflow',
     debug=False,
     strip=False,
     upx=False,
@@ -59,17 +59,17 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name='Powerflow',
+    name='Pythonflow',
 )
 
 app = BUNDLE(
     coll,
-    name='Powerflow.app',
+    name='Pythonflow.app',
     icon=ICON_PATH if os.path.exists(ICON_PATH) else None,
-    bundle_identifier='com.powerflow.monitor',
+    bundle_identifier='com.pythonflow.monitor',
     info_plist={
-        'CFBundleName': 'Powerflow',
-        'CFBundleDisplayName': 'Powerflow',
+        'CFBundleName': 'Pythonflow',
+        'CFBundleDisplayName': 'Pythonflow',
         'CFBundleVersion': VERSION,
         'CFBundleShortVersionString': VERSION,
         'LSUIElement': True,

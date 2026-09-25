@@ -1,12 +1,12 @@
-# Powerflow
+# Pythonflow
 
 A macOS menu bar app that shows where your Mac's power goes: what the charger
 delivers, what the Mac uses, and what goes into or comes out of the battery.
 It also keeps a history of every charge.
 
-![Powerflow dashboard](docs/screenshot.png)
+![Pythonflow dashboard](docs/screenshot.png)
 
-This is a Python rewrite of [Powerflow](https://github.com/lzt1008/powerflow)
+Pythonflow is a Python rewrite of [Powerflow](https://github.com/lzt1008/powerflow)
 (originally Rust/Tauri/Vue). The original crashes on launch on macOS 27 and is no
 longer maintained. This version fixes those problems and never connects to the
 internet.
@@ -34,13 +34,13 @@ internet.
 - **Reads power sensors only**: the battery registry (`AppleSmartBattery`) and
   the SMC power and temperature sensors. It doesn't read serial numbers or your
   computer's name.
-- **Your data stays on your Mac** in `~/Library/Application Support/Powerflow`.
+- **Your data stays on your Mac** in `~/Library/Application Support/Pythonflow`.
   You can turn off history recording or delete it all in Settings.
 
 ## Install
 
 You need Python 3 from [python.org](https://www.python.org/downloads/).
-Powerflow is tested on macOS 27.0 with Apple silicon.
+Pythonflow is tested on macOS 27.0 with Apple silicon.
 
 1. Download the project:
 
@@ -51,15 +51,17 @@ Powerflow is tested on macOS 27.0 with Apple silicon.
    (Or use **Code → Download ZIP** on GitHub and unzip it.)
 2. In the `powerflow` folder, double-click **`First Time Setup.command`**. It
    installs the pinned Python packages listed in
-   `Application Files/requirements.txt` and builds `Powerflow.app`.
-   If macOS blocks the script, right-click it and choose **Open**.
-3. Double-click **`Powerflow.app`**. Its wattage appears in the menu bar. Click it
-   and choose **Open Dashboard** for the full view.
-4. Optional: move `Powerflow.app` to `/Applications` and add it in
-   System Settings → General → Login Items to start it at login.
+   `Application Files/requirements.txt`, then builds `Pythonflow.app` and installs
+   it in `/Applications`. If macOS blocks the script, right-click it and choose
+   **Open**.
+3. Open **Pythonflow** from Applications, Launchpad or Spotlight. It's a normal,
+   self-contained app, so Python isn't needed to run it. Its wattage appears in
+   the menu bar; click it and choose **Open Dashboard** for the full view.
+4. Optional: add it in System Settings → General → Login Items to start it at
+   login.
 
-To update later, double-click **`Build Powerflow.command`**. It pulls the latest
-code, runs the tests and rebuilds the app.
+To update later, double-click **`Build Pythonflow.command`**. It pulls the latest
+code, runs the tests, and rebuilds and reinstalls the app.
 
 ### Coming from the original Powerflow
 
@@ -100,7 +102,7 @@ python3 -m pytest
 cd "Application Files" && python3 main.py
 ```
 
-Set `POWERFLOW_DATA_DIR=/some/folder` to run against a throwaway data folder.
+Set `PYTHONFLOW_DATA_DIR=/some/folder` to run against a throwaway data folder.
 See [CLAUDE.md](CLAUDE.md) for the architecture and the rules the code follows.
 
 ## Credits

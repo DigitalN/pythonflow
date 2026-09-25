@@ -1,11 +1,11 @@
-"""Powerflow — a menu bar power monitor for macOS.
+"""Pythonflow — a menu bar power monitor for macOS.
 
 Launcher: logging, single-instance lock, sampler thread, menu bar item and the
 pywebview dashboard window.
 
 There is deliberately no HTTP server: the dashboard page talks to Python over
 pywebview's in-process bridge, so the app opens no network ports and makes no
-network requests. All data stays in ~/Library/Application Support/Powerflow.
+network requests. All data stays in ~/Library/Application Support/Pythonflow.
 """
 
 import fcntl
@@ -19,21 +19,23 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-APP_NAME = "Powerflow"
+APP_NAME = "Pythonflow"
 VERSION = "1.0.0"
-if os.environ.get("POWERFLOW_DATA_DIR"):  # for development/testing against a throwaway folder
-    DATA_DIR = Path(os.environ["POWERFLOW_DATA_DIR"]).expanduser()
+if os.environ.get("PYTHONFLOW_DATA_DIR"):  # for development/testing against a throwaway folder
+    DATA_DIR = Path(os.environ["PYTHONFLOW_DATA_DIR"]).expanduser()
     LOG_DIR = DATA_DIR / "Logs"
+    LEGACY_DIR = DATA_DIR  # tests put copies of the old app's files here
 else:
     DATA_DIR = Path.home() / "Library" / "Application Support" / APP_NAME
     LOG_DIR = Path.home() / "Library" / "Logs" / APP_NAME
+    LEGACY_DIR = Path.home() / "Library" / "Application Support" / "Powerflow"
 LOG_PATH = LOG_DIR / "app.log"
-# Files written by the Rust version (0.2.x), imported read-only on first launch.
-LEGACY_DB = DATA_DIR / "db.sqlite"
-LEGACY_PREFS = DATA_DIR / "tauri-plugin-pinia" / "preference.json"
+# Files written by the original Rust app (Powerflow 0.2.x), imported read-only on first launch.
+LEGACY_DB = LEGACY_DIR / "db.sqlite"
+LEGACY_PREFS = LEGACY_DIR / "tauri-plugin-pinia" / "preference.json"
 LIVE_BUFFER_POINTS = 1800  # 15 minutes at the fastest (0.5 s) interval
 
-log = logging.getLogger("powerflow")
+log = logging.getLogger("pythonflow")
 
 
 def _app_files_dir():
@@ -94,7 +96,7 @@ class LiveState:
 
 class Sampler(threading.Thread):
     def __init__(self, reader, interval_ms, on_sample):
-        super().__init__(name="powerflow-sampler", daemon=True)
+        super().__init__(name="pythonflow-sampler", daemon=True)
         self._reader = reader
         self._on_sample = on_sample
         self._interval = interval_ms / 1000
@@ -159,7 +161,7 @@ class Api:
             return None
         day = datetime.fromtimestamp(session["started_at"]).strftime("%Y-%m-%d-%H%M")
         result = self._app._window.create_file_dialog(
-            webview.FileDialog.SAVE, save_filename=f"powerflow-charge-{day}.csv",
+            webview.FileDialog.SAVE, save_filename=f"pythonflow-charge-{day}.csv",
             file_types=("CSV files (*.csv)",),
         )
         if not result:
@@ -184,7 +186,7 @@ class Api:
         log.warning("Dashboard error: %s", str(message)[:1000])
 
 
-class PowerflowApp:
+class PythonflowApp:
     def __init__(self):
         from history import ChargingRecorder, HistoryStore
         from power import PowerReader
@@ -316,7 +318,7 @@ class PowerflowApp:
         self._sampler.start()
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
 
-        log.info("Powerflow %s started (dashboard %s)", VERSION, "hidden" if start_hidden else "shown")
+        log.info("Pythonflow %s started (dashboard %s)", VERSION, "hidden" if start_hidden else "shown")
         webview.start(private_mode=True, debug=False)
         os._exit(0)
 
@@ -325,13 +327,13 @@ def main():
     _setup_logging()
     lock = _acquire_single_instance_lock()
     if lock is None:
-        log.info("Another Powerflow instance is already running; exiting")
+        log.info("Another Pythonflow instance is already running; exiting")
         return
     sys.path.insert(0, str(_app_files_dir()))
     try:
-        PowerflowApp().run()
+        PythonflowApp().run()
     except Exception:
-        log.exception("Powerflow failed to start")
+        log.exception("Pythonflow failed to start")
         raise
 
 

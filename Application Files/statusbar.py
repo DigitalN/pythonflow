@@ -83,7 +83,7 @@ class StatusBar:
         self._button.setFont_(NSFont.monospacedDigitSystemFontOfSize_weight_(size, AppKit.NSFontWeightRegular))
         self._button.setImagePosition_(AppKit.NSImageLeading)
         self._button.setTitle_(format_watts(None))
-        self._button.setToolTip_("Powerflow")
+        self._button.setToolTip_("Pythonflow")
 
         bolt = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt.fill", "Charging")
         config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(size - 2, AppKit.NSFontWeightRegular)
@@ -116,7 +116,7 @@ class StatusBar:
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(self._action_item("Open Dashboard", "openDashboard:", "d"))
         menu.addItem_(NSMenuItem.separatorItem())
-        menu.addItem_(self._action_item("Quit Powerflow", "quitApp:", "q"))
+        menu.addItem_(self._action_item("Quit Pythonflow", "quitApp:", "q"))
         self._item.setMenu_(menu)
         self._menu = menu
 

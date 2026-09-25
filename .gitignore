@@ -1,7 +1,7 @@
 # Build output
 Application Files/build/
 Application Files/dist/
-Powerflow.app/
+Pythonflow.app/
 
 # Python
 __pycache__/
