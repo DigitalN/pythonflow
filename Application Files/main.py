@@ -181,6 +181,12 @@ class Api:
         return {"version": VERSION, "data_dir": str(DATA_DIR), "log_path": str(LOG_PATH),
                 "history_recording": self._app._settings.get()["record_history"]}
 
+    def set_content_height(self, height):
+        """The page reports how tall it needs to be; the window can't be made taller."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._app._fit_window_height, float(height))
+
     def log_error(self, message):
         """Page errors land in app.log next to the Python ones."""
         log.warning("Dashboard error: %s", str(message)[:1000])
@@ -230,6 +236,24 @@ class PythonflowApp:
             return
         name = {"light": AppKit.NSAppearanceNameAqua, "dark": AppKit.NSAppearanceNameDarkAqua}.get(theme)
         self._window.native.setAppearance_(AppKit.NSAppearance.appearanceNamed_(name) if name else None)
+
+    def _fit_window_height(self, content_height):
+        """Cap the window at the height the current page needs, so dragging it taller
+        stops once everything fits. If it's already taller (e.g. after switching to a
+        shorter tab), shrink it, keeping the top edge in place. Width stays free."""
+        window = self._window.native if self._window else None
+        if window is None:
+            return
+        # pywebview sets the minimum as a frame size (title bar included).
+        min_height = window.contentRectForFrameRect_(((0, 0), window.minSize())).size.height
+        max_height = max(min_height, content_height)
+        window.setContentMaxSize_((100_000, max_height))
+        content = window.contentRectForFrameRect_(window.frame())
+        if content.size.height > max_height + 0.5:
+            content.origin.y += content.size.height - max_height
+            content.size.height = max_height
+            window.setFrame_display_animate_(window.frameRectForContentRect_(content), True,
+                                             bool(window.isVisible()))
 
     def show_dashboard(self):
         import AppKit
