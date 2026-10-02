@@ -51,6 +51,11 @@ To reproduce without touching the user's data, run with
   Keep internals behind a leading underscore.
 - AppKit calls must run on the main thread: use `AppHelper.callAfter`.
   Non-locking pywebview events (`loaded`, `shown`) fire on worker threads.
+- **Nothing on the dashboard may animate continuously**, and no CSS transition may
+  outlast the 1 s refresh. The original flowing pipes and eased bars kept WebKit
+  repainting every display frame: about 28% of a core, against 3% now (measured).
+- The sampler runs every 1 s while the page is polling (it only polls when visible)
+  and every 2.5 s otherwise. These are fixed, not a setting.
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
   the fans stay at minimum.

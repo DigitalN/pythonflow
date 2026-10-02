@@ -2,7 +2,7 @@
 
 Every value is validated on load and on save: a stale or hand-edited file can
 never put the app into a bad state (the old app froze its chart on an unknown
-`statusBarItem` value and could stall on a 24-hour `updateInterval`).
+`statusBarItem` value).
 """
 
 import json
@@ -15,13 +15,10 @@ log = logging.getLogger(__name__)
 
 MENU_BAR_METRICS = ("system", "screen", "chip")
 THEMES = ("system", "light", "dark")
-MIN_INTERVAL_MS = 500
-MAX_INTERVAL_MS = 60_000
 
 DEFAULTS = {
     "menu_bar_metric": "system",
     "menu_bar_show_charging": True,
-    "update_interval_ms": 2000,
     "theme": "system",
     "open_dashboard_at_launch": True,
     "record_history": True,
@@ -40,9 +37,6 @@ def validate(raw):
     for key in ("menu_bar_show_charging", "open_dashboard_at_launch", "record_history"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]
-    interval = raw.get("update_interval_ms")
-    if isinstance(interval, (int, float)) and not isinstance(interval, bool):
-        s["update_interval_ms"] = int(min(MAX_INTERVAL_MS, max(MIN_INTERVAL_MS, interval)))
     return s
 
 
@@ -55,7 +49,6 @@ def from_legacy_preferences(legacy):
         # The Rust app called the CPU/GPU package rail (SMC PHPC) "heatpipe".
         "menu_bar_metric": "chip" if metric == "heatpipe" else metric,
         "menu_bar_show_charging": legacy.get("statusBarShowCharging"),
-        "update_interval_ms": legacy.get("updateInterval"),
         "theme": legacy.get("theme"),
     }
 
