@@ -33,7 +33,11 @@ LOG_PATH = LOG_DIR / "app.log"
 # Files written by the original Rust app (Powerflow 0.2.x), imported read-only on first launch.
 LEGACY_DB = LEGACY_DIR / "db.sqlite"
 LEGACY_PREFS = LEGACY_DIR / "tauri-plugin-pinia" / "preference.json"
-LIVE_BUFFER_POINTS = 1800  # 15 minutes at the fastest (0.5 s) interval
+# Sampling is the app's whole idle cost, so it only runs fast while someone is looking.
+DASHBOARD_INTERVAL = 1.0  # seconds, while the dashboard page is visible
+BACKGROUND_INTERVAL = 2.5  # seconds, menu bar only
+DASHBOARD_IDLE_AFTER = 3.0  # seconds without a poll from the page before dropping back
+LIVE_BUFFER_POINTS = 900  # 15 minutes at the dashboard interval
 
 log = logging.getLogger("pythonflow")
 
@@ -95,16 +99,24 @@ class LiveState:
 
 
 class Sampler(threading.Thread):
-    def __init__(self, reader, interval_ms, on_sample):
+    def __init__(self, reader, on_sample):
         super().__init__(name="pythonflow-sampler", daemon=True)
         self._reader = reader
         self._on_sample = on_sample
-        self._interval = interval_ms / 1000
+        self._last_poll = float("-inf")
         self._wake = threading.Event()
 
-    def set_interval(self, interval_ms):
-        self._interval = interval_ms / 1000
-        self._wake.set()
+    def interval(self):
+        watched = time.monotonic() - self._last_poll < DASHBOARD_IDLE_AFTER
+        return DASHBOARD_INTERVAL if watched else BACKGROUND_INTERVAL
+
+    def dashboard_polled(self):
+        """The page only polls while it is visible (not hidden, minimised or covered),
+        so its polls are what keep the faster rate on."""
+        was_background = self.interval() == BACKGROUND_INTERVAL
+        self._last_poll = time.monotonic()
+        if was_background:
+            self._wake.set()  # sample now rather than at the end of a 2.5 s wait
 
     def run(self):
         import objc
@@ -116,7 +128,7 @@ class Sampler(threading.Thread):
                     self._on_sample(self._reader.read())
                 except Exception:
                     log.exception("Sampling failed")
-            self._wake.wait(max(0.05, self._interval - (time.monotonic() - started)))
+            self._wake.wait(max(0.05, self.interval() - (time.monotonic() - started)))
             self._wake.clear()
 
 
@@ -131,6 +143,7 @@ class Api:
         self._app = app
 
     def get_live(self, since_seq=0):
+        self._app._sampler.dashboard_polled()
         return self._app._live.since(int(since_seq or 0))
 
     def get_settings(self):
@@ -204,7 +217,7 @@ class PythonflowApp:
         self._reader = PowerReader()
         prefs = self._settings.get()
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
-        self._sampler = Sampler(self._reader, prefs["update_interval_ms"], self._on_sample)
+        self._sampler = Sampler(self._reader, self._on_sample)
         self._window = None
         self._statusbar = None
         self._quitting = False
@@ -223,7 +236,6 @@ class PythonflowApp:
     def _on_settings_changed(self, values):
         from PyObjCTools import AppHelper
 
-        self._sampler.set_interval(values["update_interval_ms"])
         self._recorder.enabled = values["record_history"]
         AppHelper.callAfter(self._apply_theme, values["theme"])
 

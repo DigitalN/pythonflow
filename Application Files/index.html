@@ -90,7 +90,7 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .hero .state { font-size: 15px; font-weight: 500; }
 .hero .sub { color: var(--muted); margin-top: 3px; }
 .gauge { height: 8px; border-radius: 4px; background: var(--seg-bg); overflow: hidden; margin-top: 10px; max-width: 420px; }
-.gauge > div { height: 100%; width: 0; background: var(--drain); border-radius: 4px; transition: width .6s ease; }
+.gauge > div { height: 100%; width: 0; background: var(--drain); border-radius: 4px; }
 .gauge.charge > div { background: var(--charge); }
 .gauge.idle > div { background: var(--accent); }
 .chip {
@@ -114,23 +114,19 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .link { position: relative; height: 56px; display: flex; flex-direction: column; justify-content: center; }
 .link .label { text-align: center; font-weight: 600; font-size: 13px; min-height: 18px; }
 .link .note { text-align: center; font-size: 11px; color: var(--muted); min-height: 15px; }
-.pipe {
-  height: 4px; margin: 4px 6px; border-radius: 3px; background: var(--seg-bg); position: relative; overflow: hidden;
-  transition: height .4s ease;
+/* A static arrow pointing the way the power flows. Nothing here animates: anything
+   that moves continuously keeps WebKit repainting on every display frame. */
+.pipe { height: 4px; margin: 4px 10px; border-radius: 3px; background: var(--seg-bg); position: relative; }
+.pipe.on { background: var(--pipe-color); }
+.pipe.on::after {
+  content: ""; position: absolute; top: 50%; right: -6px; transform: translateY(-50%);
+  border: solid transparent; border-width: 8px 0 8px 11px; border-left-color: var(--pipe-color);
 }
-.pipe::after {
-  content: ""; position: absolute; inset: 0; opacity: 0;
-  background: repeating-linear-gradient(90deg, var(--pipe-color) 0 12px, transparent 12px 20px);
-  background-size: 20px 100%;
-}
-.pipe.on::after { opacity: 1; animation: flow 0.9s linear infinite; }
-.pipe.rev::after { animation-direction: reverse; }
-@keyframes flow { from { background-position: 0 0; } to { background-position: 20px 0; } }
-@media (prefers-reduced-motion: reduce) { .pipe.on::after { animation: none; } }
+.pipe.on.rev::after { right: auto; left: -6px; border-width: 8px 11px 8px 0; border-right-color: var(--pipe-color); }
 
 .breakdown { margin-top: 14px; }
 .stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--seg-bg); }
-.stack > div { height: 100%; transition: width .5s ease; }
+.stack > div { height: 100%; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
 .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
 .legend b { color: var(--text); font-weight: 500; margin-left: 4px; }
@@ -362,17 +358,6 @@ dialog .actions { justify-content: flex-end; }
           <div class="srow">
             <div class="lbl">Show adapter input while charging<div class="hint">Displays a ⚡︎ and the watts coming from the charger.</div></div>
             <label class="switch"><input type="checkbox" id="s-show-charging"><span></span></label>
-          </div>
-          <div class="srow">
-            <div class="lbl">Update every</div>
-            <select id="s-interval">
-              <option value="500">0.5 seconds</option>
-              <option value="1000">1 second</option>
-              <option value="2000">2 seconds</option>
-              <option value="5000">5 seconds</option>
-              <option value="10000">10 seconds</option>
-              <option value="30000">30 seconds</option>
-            </select>
           </div>
         </div>
       </div>
@@ -734,6 +719,7 @@ function renderLiveChart() {
 }
 
 // ── polling ─────────────────────────────────────────────
+const POLL_MS = 1000;  // main.py samples at this rate while the page is polling
 let polling = false;
 async function poll() {
   clearTimeout(pollTimer);
@@ -759,7 +745,7 @@ async function poll() {
     }
   } catch (e) { console.error(e); }
   polling = false;
-  pollTimer = setTimeout(poll, Math.max(500, settings?.update_interval_ms || 2000));
+  pollTimer = setTimeout(poll, POLL_MS);
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
 window.addEventListener('resize', () => { renderLiveChart(); if (activeTab === 'history') renderDetailCharts(); });
@@ -885,9 +871,6 @@ async function renderSettings() {
   if (!settings) return;
   $('s-metric').value = settings.menu_bar_metric;
   $('s-show-charging').checked = settings.menu_bar_show_charging;
-  const iv = String(settings.update_interval_ms);
-  if (![...$('s-interval').options].some(o => o.value === iv)) $('s-interval').add(new Option(`${settings.update_interval_ms / 1000} seconds`, iv));
-  $('s-interval').value = iv;
   for (const b of $('s-theme').children) b.setAttribute('aria-selected', b.dataset.theme === settings.theme);
   $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
   $('s-record').checked = settings.record_history;
@@ -906,7 +889,6 @@ async function save(changes) {
 }
 $('s-metric').onchange = e => save({ menu_bar_metric: e.target.value });
 $('s-show-charging').onchange = e => save({ menu_bar_show_charging: e.target.checked });
-$('s-interval').onchange = e => save({ update_interval_ms: +e.target.value });
 $('s-open-at-launch').onchange = e => save({ open_dashboard_at_launch: e.target.checked });
 $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
