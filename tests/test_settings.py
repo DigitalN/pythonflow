@@ -46,3 +46,11 @@ def test_update_persists_and_notifies_only_on_change(tmp_path):
 def test_corrupt_file_uses_defaults(tmp_path):
     (tmp_path / "settings.json").write_text("{not json")
     assert Settings(tmp_path / "settings.json").get() == DEFAULTS
+
+
+def test_automatic_updates_start_on_and_can_be_turned_off(tmp_path):
+    store = Settings(tmp_path / "settings.json")
+    assert store.get()["update_automatically"] is True
+    store.update({"update_automatically": False})
+    assert Settings(tmp_path / "settings.json").get()["update_automatically"] is False
+    assert validate({"update_automatically": "no"})["update_automatically"] is True

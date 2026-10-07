@@ -8,8 +8,11 @@ It also keeps a history of every charge.
 
 Pythonflow is a Python rewrite of [Powerflow](https://github.com/lzt1008/powerflow)
 (originally Rust/Tauri/Vue). The original crashes on launch on macOS 27 and is no
-longer maintained. This version fixes those problems and never connects to the
-internet.
+longer maintained. This version fixes those problems, and the only thing it connects
+to is GitHub, to update itself.
+
+**[⬇︎ Download the latest version](https://github.com/DigitalN/pythonflow/releases/latest)**
+(free, for Macs with Apple silicon)
 
 ## Features
 
@@ -25,12 +28,15 @@ internet.
   Export any session to CSV.
 - Light and dark mode. It lives in the menu bar, and the Dock icon only appears
   while the dashboard window is open.
+- Opens at login and keeps itself up to date. Both can be turned off in Settings.
 
 ## Privacy
 
-- **No network access.** There are no update checks, analytics or crash reports,
-  and no local web server. The dashboard runs under a Content-Security-Policy
-  that blocks all connections.
+- **Its only connection is the update check.** Once a day, after your Mac wakes, it
+  asks GitHub for the latest release and downloads it if it's new. It installs only
+  an app signed by the same developer. There are no analytics or crash reports, and
+  no local web server. The dashboard runs under a Content-Security-Policy that blocks
+  all connections.
 - **Reads power sensors only**: the battery registry (`AppleSmartBattery`) and
   the SMC power and temperature sensors. It doesn't read serial numbers or your
   computer's name.
@@ -39,29 +45,19 @@ internet.
 
 ## Install
 
-You need Python 3 from [python.org](https://www.python.org/downloads/).
-Pythonflow is tested on macOS 27.0 with Apple silicon.
+1. **Download** `Pythonflow-….dmg` from the
+   [latest release](https://github.com/DigitalN/pythonflow/releases/latest) and open it.
+2. **Drag Pythonflow into Applications**, as the arrow shows.
+3. **Open Pythonflow** from Applications. Its wattage appears in the menu bar; click
+   it and choose **Open Dashboard** for the full view.
 
-1. Download the project:
+The first time you open it, macOS may say it can't verify Pythonflow. Click **Done**,
+then go to **System Settings → Privacy & Security**, scroll down, and click **Open
+Anyway**. You only do this once. It's needed because Pythonflow is free and isn't
+distributed through Apple, so Apple hasn't checked it; all of its code is on this page.
 
-   ```bash
-   git clone https://github.com/DigitalN/pythonflow.git
-   ```
-
-   (Or use **Code → Download ZIP** on GitHub and unzip it.)
-2. In the `pythonflow` folder, double-click **`First Time Setup.command`**. It
-   installs the pinned Python packages listed in
-   `Application Files/requirements.txt`, then builds `Pythonflow.app` and installs
-   it in `/Applications`. If macOS blocks the script, right-click it and choose
-   **Open**.
-3. Open **Pythonflow** from Applications, Launchpad or Spotlight. It's a normal,
-   self-contained app, so Python isn't needed to run it. Its wattage appears in
-   the menu bar; click it and choose **Open Dashboard** for the full view.
-4. Optional: add it in System Settings → General → Login Items to start it at
-   login.
-
-To update later, double-click **`Build Pythonflow.command`**. It pulls the latest
-code, runs the tests, and rebuilds and reinstalls the app.
+Pythonflow is tested on macOS 27.0 with Apple silicon. To build it from source
+instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ### Coming from the original Powerflow
 
@@ -94,16 +90,9 @@ you can delete the old `/Applications/powerflow.app`.
 
 ## Development
 
-```bash
-python3 -m pytest
-```
-
-```bash
-cd "Application Files" && python3 main.py
-```
-
-Set `PYTHONFLOW_DATA_DIR=/some/folder` to run against a throwaway data folder.
-See [CLAUDE.md](CLAUDE.md) for the architecture and the rules the code follows.
+Building from source, the release checklist and how updates work are in
+[DEVELOPMENT.md](DEVELOPMENT.md). See [CLAUDE.md](CLAUDE.md) for the architecture and
+the rules the code follows.
 
 ## Credits
 

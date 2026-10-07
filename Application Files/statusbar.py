@@ -71,12 +71,15 @@ class _MenuTarget(NSObject):
     def openDashboard_(self, sender):
         self.on_open()
 
+    def checkForUpdates_(self, sender):
+        self.on_check_updates()
+
     def quitApp_(self, sender):
         self.on_quit()
 
 
 class StatusBar:
-    def __init__(self, on_open, on_quit):
+    def __init__(self, on_open, on_check_updates, on_quit):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self._button = self._item.button()
         size = NSFont.menuBarFontOfSize_(0).pointSize()
@@ -94,6 +97,7 @@ class StatusBar:
 
         self._target = _MenuTarget.alloc().init()
         self._target.on_open = on_open
+        self._target.on_check_updates = on_check_updates
         self._target.on_quit = on_quit
 
         self._menu_font = NSFont.menuFontOfSize_(0)
@@ -116,6 +120,8 @@ class StatusBar:
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(self._action_item("Open Dashboard", "openDashboard:", "d"))
         menu.addItem_(NSMenuItem.separatorItem())
+        self._update_item = self._action_item("Check for Updates…", "checkForUpdates:", "")
+        menu.addItem_(self._update_item)
         menu.addItem_(self._action_item("Quit Pythonflow", "quitApp:", "q"))
         self._item.setMenu_(menu)
         self._menu = menu
@@ -138,6 +144,16 @@ class StatusBar:
             NSForegroundColorAttributeName: NSColor.labelColor(),
         }, (start, len(text) - start))
         self._rows[key].setAttributedTitle_(title)
+
+    def set_update_status(self, status, version):
+        """Mirrors updater.Updater's status: only "check" and "restart" can be clicked."""
+        title, enabled = {
+            "checking": ("Checking for Updates…", False),
+            "downloading": (f"Downloading Pythonflow {version}…", False),
+            "ready": (f"Restart to Update to {version}", True),
+        }.get(status, ("Check for Updates…", True))
+        self._update_item.setTitle_(title)
+        self._update_item.setEnabled_(enabled)
 
     def update(self, sample, settings):
         charging_title = settings.get("menu_bar_show_charging") and sample.get("is_charging")

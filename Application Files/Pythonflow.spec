@@ -3,9 +3,12 @@
 # Data lives in ~/Library/Application Support/Pythonflow, logs in ~/Library/Logs/Pythonflow.
 
 import os
+import re
 
 ICON_PATH = os.path.join(SPECPATH, 'Pythonflow.icns')
-VERSION = '1.0.0'
+# The version lives in main.py only.
+with open(os.path.join(SPECPATH, 'main.py'), encoding='utf-8') as f:
+    VERSION = re.search(r'^VERSION = "([^"]+)"', f.read(), re.MULTILINE).group(1)
 
 a = Analysis(
     ['main.py'],
@@ -22,6 +25,7 @@ a = Analysis(
         'AppKit',
         'WebKit',
         'PyObjCTools.AppHelper',
+        'Quartz',
     ],
     hookspath=[],
     runtime_hooks=[],

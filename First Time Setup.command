@@ -1,8 +1,8 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
 #  Pythonflow — First Time Setup
-#  Double-click this file to install what's needed and build the
-#  app. Only needs to be run once on a new machine.
+#  Double-click this file to install what's needed, then build and
+#  install the app. Only needs to be run once on a new machine.
 # ═══════════════════════════════════════════════════════════════
 
 set -e
@@ -40,23 +40,10 @@ echo ""
 echo "  ✓ All packages installed"
 echo ""
 
-# ── 3. Build the app ─────────────────────────────────────────
-pkill -x Pythonflow 2>/dev/null || true
+# ── 3. Build, install and launch the app ─────────────────────
 echo "→ Building Pythonflow.app..."
 echo ""
-cd "$PROJECT_ROOT/Application Files"
-python3 -m PyInstaller Pythonflow.spec --noconfirm --clean 2>&1 | tail -3
-echo ""
-
-if [ -d "dist/Pythonflow.app" ]; then
-    rm -rf "/Applications/Pythonflow.app"
-    ditto "dist/Pythonflow.app" "/Applications/Pythonflow.app"
-    # Clear Finder/iCloud metadata picked up during the build (it blocks codesign), then ad-hoc sign.
-    xattr -cr "/Applications/Pythonflow.app"
-    codesign --force --deep -s - "/Applications/Pythonflow.app" >/dev/null 2>&1 || echo "  (ad-hoc signing skipped)"
-    rm -rf build dist
-    echo "  ✓ Pythonflow.app installed in /Applications"
-else
+if ! "$PROJECT_ROOT/scripts/install.sh"; then
     echo "  ✗ Build failed — check output above"
     echo ""
     echo "Press any key to close..."
@@ -67,19 +54,13 @@ fi
 # ── Done ──────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  ✓ Setup complete!"
+echo "  ✓ Setup complete! Pythonflow is running in the menu bar."
 echo ""
-echo "  To launch: open Pythonflow from Applications, Launchpad or Spotlight"
-echo "  (Optional) add it to System Settings → General → Login Items"
-echo "  to start it at login."
-echo "  To rebuild after updates: double-click 'Build Pythonflow.command'"
+echo "  It opens at login and keeps itself up to date; you can"
+echo "  turn either off in its Settings."
+echo "  To rebuild your own changes: double-click 'Build Pythonflow.command'"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
-read -p "Launch Pythonflow now? (y/n) " -n 1 answer
-echo ""
-if [[ "$answer" =~ ^[Yy]$ ]]; then
-    open "/Applications/Pythonflow.app"
-fi
-
+read -p "Press any key to close..." -n 1
 osascript -e 'tell application "Terminal" to close front window' &>/dev/null &

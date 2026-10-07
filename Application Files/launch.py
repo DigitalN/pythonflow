@@ -1,0 +1,168 @@
+"""Where Pythonflow runs from, relaunching it, and opening it at login.
+
+Pythonflow has to run from an Applications folder. Opened straight from the
+downloaded disk image or the Downloads folder, macOS runs a temporary hidden copy
+("app translocation"): a login item would point at that copy, and the app can't
+replace itself with an update. On launch from anywhere else, it offers to move.
+
+Everything here is a no-op when running from source (`python3 main.py`), where the
+"app" is Python itself.
+"""
+
+import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+log = logging.getLogger("pythonflow")
+
+REPOSITORY = "DigitalN/pythonflow"
+RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
+# Passed when relaunching into an update, so the dashboard doesn't pop up on its own.
+BACKGROUND_ARGUMENT = "--background"
+
+# SMAppServiceStatus
+_ENABLED = 1
+
+
+def bundle_path():
+    """The running Pythonflow.app, or None when running from source."""
+    if not getattr(sys, "frozen", False):
+        return None
+    from Foundation import NSBundle
+
+    return Path(NSBundle.mainBundle().bundlePath())
+
+
+def in_applications_folder(path):
+    resolved = str(Path(path).resolve())
+    folders = ("/Applications/", str(Path.home() / "Applications") + "/")
+    return resolved.startswith(folders)
+
+
+def activate_app():
+    import AppKit
+
+    app = AppKit.NSApp
+    if hasattr(app, "activate"):
+        app.activate()
+    else:
+        app.activateIgnoringOtherApps_(True)
+
+
+def offer_to_move(source):
+    """Asks to move the app into Applications. Returns True if it's relaunching from there."""
+    import AppKit
+    from Foundation import NSURL, NSFileManager
+
+    activate_app()
+    alert = AppKit.NSAlert.alloc().init()
+    alert.setMessageText_("Move Pythonflow to your Applications folder?")
+    alert.setInformativeText_("Pythonflow needs to be in Applications to open at login and keep itself up to date.")
+    alert.addButtonWithTitle_("Move to Applications")
+    alert.addButtonWithTitle_("Not Now")
+    if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+        return False
+
+    manager = NSFileManager.defaultManager()
+    for folder in (Path("/Applications"), Path.home() / "Applications"):
+        destination = folder / source.name
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                ok, _, error = manager.trashItemAtURL_resultingItemURL_error_(
+                    NSURL.fileURLWithPath_(str(destination)), None, None)
+                if not ok:
+                    raise OSError(str(error))
+            subprocess.run(["/usr/bin/ditto", str(source), str(destination)], check=True, capture_output=True)
+        except (OSError, subprocess.CalledProcessError) as e:
+            log.warning("Couldn't move Pythonflow to %s: %s", folder, e)
+            continue
+        # The user already chose to open this download; don't make them approve the copy again.
+        subprocess.run(["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(destination)], capture_output=True)
+        log.info("Moved Pythonflow to %s; relaunching", destination)
+        relaunch(destination)
+        return True
+
+    failure = AppKit.NSAlert.alloc().init()
+    failure.setMessageText_("Pythonflow couldn't move itself")
+    failure.setInformativeText_("Quit Pythonflow, drag it into your Applications folder in Finder, then open it from there.")
+    failure.runModal()
+    return False
+
+
+def relaunch(app, background=False):
+    """Opens `app` once this process has exited. The caller quits right after.
+
+    Waiting for the exit matters: until then this copy holds the single-instance
+    lock, and the new one would quit straight away.
+    """
+    arguments = ["-g"] if background else []
+    if os.environ.get("PYTHONFLOW_DATA_DIR"):  # keep a test copy on its test folder
+        arguments += ["--env", f"PYTHONFLOW_DATA_DIR={os.environ['PYTHONFLOW_DATA_DIR']}"]
+    arguments.append(str(app))
+    if background:
+        arguments += ["--args", BACKGROUND_ARGUMENT]
+    script = (
+        'pid=$1; shift; tries=0\n'
+        'while kill -0 "$pid" 2>/dev/null && [ $tries -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done\n'
+        'exec /usr/bin/open "$@"\n'
+    )
+    subprocess.Popen(["/bin/sh", "-c", script, "sh", str(os.getpid()), *arguments],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+class LoginItem:
+    """"Open at login", through ServiceManagement's SMAppService (macOS 13+).
+
+    Only available to the app itself running from Applications: the login item
+    points at wherever the app is when it's turned on.
+    """
+
+    def __init__(self, app_path, data_dir):
+        self._service = None
+        self._marker = Path(data_dir) / ".open-at-login-default-applied"
+        if app_path is None or not in_applications_folder(app_path):
+            return
+        try:
+            import objc
+
+            objc.loadBundle("ServiceManagement", {},
+                            bundle_path="/System/Library/Frameworks/ServiceManagement.framework")
+            service_class = objc.lookUpClass("SMAppService")
+            for selector in (b"registerAndReturnError:", b"unregisterAndReturnError:"):
+                objc.registerMetaDataForSelector(b"SMAppService", selector,
+                                                 {"arguments": {2: {"type_modifier": b"o"}}})
+            self._service = service_class.mainAppService()
+        except Exception:
+            log.exception("Open at login isn't available")
+
+    @property
+    def available(self):
+        return self._service is not None
+
+    @property
+    def enabled(self):
+        return self.available and self._service.status() == _ENABLED
+
+    def set_enabled(self, on):
+        if not self.available or on == self.enabled:
+            return
+        if on:
+            ok, error = self._service.registerAndReturnError_(None)
+        else:
+            ok, error = self._service.unregisterAndReturnError_(None)
+        if ok:
+            log.info("Open at login turned %s", "on" if on else "off")
+        else:
+            log.warning("Couldn't turn open at login %s: %s", "on" if on else "off", error)
+
+    def turn_on_by_default(self):
+        """Open at login starts out on. It's only switched on once, so turning it off sticks."""
+        if not self.available or self._marker.exists():
+            return
+        self.set_enabled(True)
+        self._marker.parent.mkdir(parents=True, exist_ok=True)
+        self._marker.touch()
