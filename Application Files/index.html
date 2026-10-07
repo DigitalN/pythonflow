@@ -220,6 +220,7 @@ select {
 .switch input:checked + span { background: var(--charge); }
 .switch input:checked + span::after { transform: translateX(16px); }
 .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:disabled + span { opacity: .45; }
 ul.privacy { margin: 0; padding: 12px 0 12px 18px; }
 ul.privacy li { margin: 4px 0; }
 code { font: 12px ui-monospace, "SF Mono", Menlo, monospace; background: var(--seg-bg); padding: 1px 5px; border-radius: 4px; user-select: text; -webkit-user-select: text; }
@@ -374,8 +375,16 @@ dialog .actions { justify-content: flex-end; }
             </div>
           </div>
           <div class="srow">
-            <div class="lbl">Open this window at launch<div class="hint">Off keeps Pythonflow in the menu bar only. To start at login, add Pythonflow in System Settings → General → Login Items.</div></div>
+            <div class="lbl">Open at login<div class="hint" id="s-login-hint"></div></div>
+            <label class="switch"><input type="checkbox" id="s-open-at-login"><span></span></label>
+          </div>
+          <div class="srow">
+            <div class="lbl">Open this window at launch<div class="hint">Off keeps Pythonflow in the menu bar only.</div></div>
             <label class="switch"><input type="checkbox" id="s-open-at-launch"><span></span></label>
+          </div>
+          <div class="srow">
+            <div class="lbl">Update automatically<div class="hint" id="s-update-hint"></div></div>
+            <label class="switch"><input type="checkbox" id="s-update"><span></span></label>
           </div>
         </div>
       </div>
@@ -398,7 +407,7 @@ dialog .actions { justify-content: flex-end; }
         <h3>Privacy</h3>
         <div class="card">
           <ul class="privacy">
-            <li>Pythonflow never connects to the internet: no update checks, analytics, or crash reporting, and no local server or open ports.</li>
+            <li>Pythonflow's only connection to the internet is the update check: once a day it asks GitHub for the latest release, and downloads it if it's new. No analytics or crash reporting, and no local server or open ports.</li>
             <li>It only reads power sensors (the battery registry and SMC). It doesn't read serial numbers or your computer's name.</li>
             <li>Charging history and settings stay in <code id="s-data-dir">~/Library/Application Support/Pythonflow</code>.</li>
           </ul>
@@ -753,6 +762,7 @@ window.addEventListener('resize', () => { renderLiveChart(); if (activeTab === '
 // ── tabs ────────────────────────────────────────────────
 $('tabs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.tab !== activeTab) fitNext = true;
   activeTab = b.dataset.tab;
   for (const el of $('tabs').children) el.setAttribute('aria-selected', el === b);
   for (const p of document.querySelectorAll('.page')) p.classList.toggle('active', p.id === `page-${activeTab}`);
@@ -872,9 +882,18 @@ async function renderSettings() {
   $('s-metric').value = settings.menu_bar_metric;
   $('s-show-charging').checked = settings.menu_bar_show_charging;
   for (const b of $('s-theme').children) b.setAttribute('aria-selected', b.dataset.theme === settings.theme);
+  const login = $('s-open-at-login');
+  login.checked = !!settings.launch_at_login;
+  login.disabled = settings.launch_at_login === null;
+  $('s-login-hint').textContent = login.disabled ? 'Available when Pythonflow runs from your Applications folder.' : '';
   $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
+  $('s-update').checked = settings.update_automatically;
   $('s-record').checked = settings.record_history;
   const info = await call('app_info');
+  const noUpdates = info.update_unavailable_reason;
+  $('s-update').disabled = !!noUpdates;
+  $('s-update-hint').textContent = noUpdates ? `Not available: ${noUpdates}.`
+    : 'Checks GitHub once a day, after your Mac wakes, and installs new versions when you\'re not using your Mac.';
   $('s-version').textContent = info.version;
   $('s-data-dir').textContent = info.data_dir.replace(/^\/Users\/[^/]+/, '~');
   $('s-log-path').textContent = info.log_path.replace(/^\/Users\/[^/]+/, '~');
@@ -889,7 +908,9 @@ async function save(changes) {
 }
 $('s-metric').onchange = e => save({ menu_bar_metric: e.target.value });
 $('s-show-charging').onchange = e => save({ menu_bar_show_charging: e.target.checked });
+$('s-open-at-login').onchange = e => save({ launch_at_login: e.target.checked });
 $('s-open-at-launch').onchange = e => save({ open_dashboard_at_launch: e.target.checked });
+$('s-update').onchange = e => save({ update_automatically: e.target.checked });
 $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
 $('s-reveal').onclick = () => call('reveal_data_folder');
@@ -899,21 +920,27 @@ $('s-clear').onclick = async () => {
   selectedId = null; detail = null; toast(`Deleted ${n} session${n === 1 ? '' : 's'}`); renderSettings();
 };
 
-// ── window height: never taller than the page needs ─────
-let reportedHeight = 0;
-function reportContentHeight() {
+// ── window size: never bigger than the page needs ───────
+// `fitNext` asks for the window to be made as tall as the page (on load and tab
+// switches); other reports only cap its size.
+let reportedSize = '', fitNext = true;
+function reportContentSize() {
   const page = document.querySelector('.page.active');
-  if (!page || !window.pywebview?.api?.set_content_height) return;
+  if (!page || !window.pywebview?.api?.set_content_size) return;
   const m = getComputedStyle($('main'));
+  // Past the pages' max-width, a wider window only adds empty space at the sides.
+  const w = Math.ceil((parseFloat(getComputedStyle(page).maxWidth) || 100000)
+    + parseFloat(m.paddingLeft) + parseFloat(m.paddingRight));
   const h = Math.ceil(document.querySelector('.topbar').offsetHeight + parseFloat(m.paddingTop)
     + page.offsetHeight + parseFloat(m.paddingBottom));
-  if (h === reportedHeight) return;
-  reportedHeight = h;
-  api().set_content_height(h).catch(() => {});
+  if (`${w}x${h}` === reportedSize && !fitNext) return;
+  reportedSize = `${w}x${h}`;
+  api().set_content_size(w, h, fitNext).catch(() => {});
+  fitNext = false;
 }
 // Fires on tab switches, content changes and reflow from width changes.
-const heightObserver = new ResizeObserver(() => requestAnimationFrame(reportContentHeight));
-document.querySelectorAll('.page').forEach(p => heightObserver.observe(p));
+const sizeObserver = new ResizeObserver(() => requestAnimationFrame(reportContentSize));
+document.querySelectorAll('.page').forEach(p => sizeObserver.observe(p));
 
 // ── boot ────────────────────────────────────────────────
 const reportError = msg => { try { api().log_error(msg); } catch (_) { /* bridge not ready */ } };
@@ -923,8 +950,8 @@ window.addEventListener('unhandledrejection', e => reportError(`Unhandled: ${e.r
 window.addEventListener('pywebviewready', async () => {
   settings = await call('get_settings');
   applyTheme(); renderToggles();
-  poll();
-  reportContentHeight();
+  await poll();  // measure the page with data in it, so the window opens at its final height
+  reportContentSize();
 });
 </script>
 </body>

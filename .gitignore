@@ -1,7 +1,8 @@
-# Build output
+# Build output (scripts/build.sh builds in ~/Library/Caches/Pythonflow-build)
 Application Files/build/
 Application Files/dist/
 Pythonflow.app/
+dist/
 
 # Python
 __pycache__/

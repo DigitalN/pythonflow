@@ -22,6 +22,7 @@ DEFAULTS = {
     "theme": "system",
     "open_dashboard_at_launch": True,
     "record_history": True,
+    "update_automatically": True,
 }
 
 
@@ -34,7 +35,7 @@ def validate(raw):
         s["menu_bar_metric"] = raw["menu_bar_metric"]
     if raw.get("theme") in THEMES:
         s["theme"] = raw["theme"]
-    for key in ("menu_bar_show_charging", "open_dashboard_at_launch", "record_history"):
+    for key in ("menu_bar_show_charging", "open_dashboard_at_launch", "record_history", "update_automatically"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]
     return s

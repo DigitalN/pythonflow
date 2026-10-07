@@ -4,8 +4,9 @@ Launcher: logging, single-instance lock, sampler thread, menu bar item and the
 pywebview dashboard window.
 
 There is deliberately no HTTP server: the dashboard page talks to Python over
-pywebview's in-process bridge, so the app opens no network ports and makes no
-network requests. All data stays in ~/Library/Application Support/Pythonflow.
+pywebview's in-process bridge, so the app opens no network ports. Its only network
+request is the daily update check (updater.py). All data stays in
+~/Library/Application Support/Pythonflow.
 """
 
 import fcntl
@@ -20,7 +21,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 APP_NAME = "Pythonflow"
-VERSION = "1.0.0"
+VERSION = "1.1.0"  # the build reads it from here; see the release checklist in DEVELOPMENT.md
 if os.environ.get("PYTHONFLOW_DATA_DIR"):  # for development/testing against a throwaway folder
     DATA_DIR = Path(os.environ["PYTHONFLOW_DATA_DIR"]).expanduser()
     LOG_DIR = DATA_DIR / "Logs"
@@ -38,6 +39,10 @@ DASHBOARD_INTERVAL = 1.0  # seconds, while the dashboard page is visible
 BACKGROUND_INTERVAL = 2.5  # seconds, menu bar only
 DASHBOARD_IDLE_AFTER = 3.0  # seconds without a poll from the page before dropping back
 LIVE_BUFFER_POINTS = 900  # 15 minutes at the dashboard interval
+# The dashboard opens as tall as its Now page, or the screen, whichever is smaller.
+# The page then reports its exact size (Api.set_content_size); this just avoids a jump.
+WINDOW_WIDTH = 1060
+NOW_PAGE_HEIGHT = 1040
 
 log = logging.getLogger("pythonflow")
 
@@ -147,10 +152,14 @@ class Api:
         return self._app._live.since(int(since_seq or 0))
 
     def get_settings(self):
-        return self._app._settings.get()
+        return self._app._page_settings()
 
     def save_settings(self, changes):
-        return self._app._settings.update(changes)
+        changes = dict(changes) if isinstance(changes, dict) else {}
+        if "launch_at_login" in changes:  # lives in ServiceManagement, not settings.json
+            self._app._login_item.set_enabled(bool(changes.pop("launch_at_login")))
+        self._app._settings.update(changes)
+        return self._app._page_settings()
 
     def list_sessions(self):
         return self._app._store.list_sessions()
@@ -192,13 +201,15 @@ class Api:
 
     def app_info(self):
         return {"version": VERSION, "data_dir": str(DATA_DIR), "log_path": str(LOG_PATH),
-                "history_recording": self._app._settings.get()["record_history"]}
+                "history_recording": self._app._settings.get()["record_history"],
+                "update_unavailable_reason": self._app._updater.unavailable_reason}
 
-    def set_content_height(self, height):
-        """The page reports how tall it needs to be; the window can't be made taller."""
+    def set_content_size(self, width, height, fit=False):
+        """The page reports the size it needs; the window can't be made bigger.
+        `fit` (page loaded or tab changed) also makes the window that tall."""
         from PyObjCTools import AppHelper
 
-        AppHelper.callAfter(self._app._fit_window_height, float(height))
+        AppHelper.callAfter(self._app._fit_window, float(width), float(height), bool(fit))
 
     def log_error(self, message):
         """Page errors land in app.log next to the Python ones."""
@@ -207,9 +218,11 @@ class Api:
 
 class PythonflowApp:
     def __init__(self):
+        import launch
         from history import ChargingRecorder, HistoryStore
         from power import PowerReader
         from settings import Settings
+        from updater import Updater
 
         self._settings = Settings(DATA_DIR / "settings.json", legacy_path=LEGACY_PREFS)
         self._store = HistoryStore(DATA_DIR / "history.db")
@@ -218,7 +231,13 @@ class PythonflowApp:
         prefs = self._settings.get()
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
         self._sampler = Sampler(self._reader, self._on_sample)
+        self._app_path = launch.bundle_path()
+        self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
+        self._updater = Updater(
+            self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
+            is_busy=self._busy_for_update, on_status=self._on_update_status, quit_app=self.quit)
         self._window = None
+        self._page_size = None  # (width, height) the dashboard page last asked for
         self._statusbar = None
         self._quitting = False
         self._settings.on_change(self._on_settings_changed)
@@ -232,6 +251,11 @@ class PythonflowApp:
         self._recorder.feed(sample)
         if self._statusbar is not None:
             AppHelper.callAfter(self._statusbar.update, sample, self._settings.get())
+
+    def _page_settings(self):
+        """Settings plus "open at login" (None where it isn't available, e.g. from source)."""
+        login = self._login_item.enabled if self._login_item.available else None
+        return {**self._settings.get(), "launch_at_login": login}
 
     def _on_settings_changed(self, values):
         from PyObjCTools import AppHelper
@@ -249,23 +273,57 @@ class PythonflowApp:
         name = {"light": AppKit.NSAppearanceNameAqua, "dark": AppKit.NSAppearanceNameDarkAqua}.get(theme)
         self._window.native.setAppearance_(AppKit.NSAppearance.appearanceNamed_(name) if name else None)
 
-    def _fit_window_height(self, content_height):
-        """Cap the window at the height the current page needs, so dragging it taller
-        stops once everything fits. If it's already taller (e.g. after switching to a
-        shorter tab), shrink it, keeping the top edge in place. Width stays free."""
+    def _fit_window(self, page_width=None, page_height=None, grow=False):
+        """Cap the window at the size the current page needs: any wider only adds empty
+        space at the sides, any taller at the bottom. Shrink it if it's bigger (e.g.
+        after switching to a shorter tab). With `grow` (the page loaded, the tab
+        changed, or the dashboard opened), also make it as tall as the page, as far as
+        the screen allows. A window that was exactly as tall as the page keeps fitting
+        it when the page grows; one dragged shorter stays that way. The top edge stays
+        put unless that would push the window off the screen."""
+        import AppKit
+
         window = self._window.native if self._window else None
-        if window is None:
+        if page_width is not None:
+            self._page_size = (page_width, page_height)
+        if window is None or self._page_size is None:
             return
         # pywebview sets the minimum as a frame size (title bar included).
-        min_height = window.contentRectForFrameRect_(((0, 0), window.minSize())).size.height
-        max_height = max(min_height, content_height)
-        window.setContentMaxSize_((100_000, max_height))
+        min_size = window.contentRectForFrameRect_(((0, 0), window.minSize())).size
+        max_width = max(min_size.width, self._page_size[0])
+        max_height = max(min_size.height, self._page_size[1])
+        was_fitting = abs(window.contentMaxSize().height - window.contentRectForFrameRect_(window.frame()).size.height) < 1
+        window.setContentMaxSize_((max_width, max_height))
+
         content = window.contentRectForFrameRect_(window.frame())
-        if content.size.height > max_height + 0.5:
-            content.origin.y += content.size.height - max_height
-            content.size.height = max_height
-            window.setFrame_display_animate_(window.frameRectForContentRect_(content), True,
-                                             bool(window.isVisible()))
+        width = min(content.size.width, max_width)
+        height = max_height if grow or was_fitting else min(content.size.height, max_height)
+        if abs(width - content.size.width) < 0.5 and abs(height - content.size.height) < 0.5:
+            return
+        content.origin.y += content.size.height - height
+        content.size = (width, height)
+        frame = window.frameRectForContentRect_(content)
+        screen = window.screen() or AppKit.NSScreen.mainScreen()
+        if screen is not None:
+            visible = screen.visibleFrame()
+            if frame.size.height > visible.size.height:
+                frame.origin.y += frame.size.height - visible.size.height
+                frame.size.height = visible.size.height
+            top = visible.origin.y + visible.size.height
+            frame.origin.y = min(max(frame.origin.y, visible.origin.y), top - frame.size.height)
+        window.setFrame_display_animate_(frame, True, bool(window.isVisible()))
+
+    @staticmethod
+    def _initial_height():
+        import AppKit
+
+        screen = AppKit.NSScreen.mainScreen()
+        if screen is None:
+            return NOW_PAGE_HEIGHT
+        style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable
+                 | AppKit.NSWindowStyleMaskMiniaturizable | AppKit.NSWindowStyleMaskResizable)
+        fits = AppKit.NSWindow.contentRectForFrameRect_styleMask_(screen.visibleFrame(), style).size.height
+        return int(min(NOW_PAGE_HEIGHT, fits))
 
     def show_dashboard(self):
         import AppKit
@@ -273,6 +331,18 @@ class PythonflowApp:
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
         self._apply_theme(self._settings.get()["theme"])
         self._window.show()
+        self._fit_window(grow=True)
+
+    def _busy_for_update(self):
+        """Don't relaunch into an update while the dashboard is open or a charge is
+        being recorded (a session in progress lives in memory until it ends)."""
+        window = self._window.native if self._window else None
+        shown = window is not None and (window.isVisible() or window.isMiniaturized())
+        return shown or self._recorder.recording
+
+    def _on_update_status(self, status, version):
+        if self._statusbar is not None:
+            self._statusbar.set_update_status(status, version)
 
     def _on_closing(self):
         """Closing the dashboard hides it; the app keeps running in the menu bar."""
@@ -332,27 +402,36 @@ class PythonflowApp:
         import webview.platforms.cocoa  # noqa: F401 — sets up NSApp so the menu bar item can exist early
         from PyObjCTools import AppHelper
 
+        import launch
         from statusbar import StatusBar
 
+        if self._app_path and not launch.in_applications_folder(self._app_path):
+            if launch.offer_to_move(self._app_path):
+                return  # the copy in Applications starts once this one has quit
+
         prefs = self._settings.get()
-        start_hidden = not prefs["open_dashboard_at_launch"]
+        # Relaunching into an update shouldn't pop the dashboard up.
+        start_hidden = not prefs["open_dashboard_at_launch"] or launch.BACKGROUND_ARGUMENT in sys.argv
         if start_hidden:
             AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
         self._install_quit_handler()
 
         html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
         self._window = webview.create_window(
-            APP_NAME, html=html, js_api=Api(self), width=1060, height=720, min_size=(860, 600),
-            hidden=start_hidden, background_color=self._background_color(),
+            APP_NAME, html=html, js_api=Api(self), width=WINDOW_WIDTH, height=self._initial_height(),
+            min_size=(860, 600), hidden=start_hidden, background_color=self._background_color(),
         )
         self._window.events.closing += self._on_closing
         # Non-locking pywebview events fire on a worker thread; AppKit needs the main one.
         self._window.events.loaded += lambda: AppHelper.callAfter(
             self._apply_theme, self._settings.get()["theme"])
 
-        self._statusbar = StatusBar(on_open=self.show_dashboard, on_quit=self.quit)
+        self._statusbar = StatusBar(on_open=self.show_dashboard, on_check_updates=self._updater.check_now,
+                                    on_quit=self.quit)
         self._sampler.start()
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
+        self._login_item.turn_on_by_default()
+        self._updater.start()
 
         log.info("Pythonflow %s started (dashboard %s)", VERSION, "hidden" if start_hidden else "shown")
         webview.start(private_mode=True, debug=False)
