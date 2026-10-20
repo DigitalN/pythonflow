@@ -28,7 +28,8 @@ to is GitHub, to update itself.
   Export any session to CSV.
 - Light and dark mode. It lives in the menu bar, and the Dock icon only appears
   while the dashboard window is open.
-- Opens at login and keeps itself up to date. Both can be turned off in Settings.
+- Opens at login, straight to the menu bar, and keeps itself up to date. Both can be
+  turned off in Settings.
 
 ## Privacy
 
