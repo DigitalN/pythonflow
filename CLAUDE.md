@@ -10,7 +10,15 @@ Application logs are written to `~/Library/Logs/Pythonflow/app.log` (rotating,
 reports a bug, **read the log first** before asking questions. The updater logs
 `Automatic updates off: <reason>` at launch, and `Up to date at`, `Downloading`,
 `ready to install`, `Installed …; relaunching` or `Update check failed: …` after a
-check.
+check. Each launch logs `started (dashboard shown)` or `started (dashboard hidden)`,
+plus `, opened at login` for a login launch.
+
+A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
+setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
+`WebKit's graphics process stopped responding; ending it` when it does that itself,
+and `…reloading the page` if the page's own process quits. The macOS log
+(`log show --predicate 'process == "Pythonflow"'`) has WebKit's side, e.g.
+`GPUProcess with PID … became unresponsive`.
 
 `~/Library/Logs/Powerflow/` belongs to the original Rust app (`powerflow.log`)
 and to the first Python build, which ran under the old name.
@@ -109,6 +117,10 @@ To reproduce without touching the user's data, run with
   may be in the middle of something.
 - After testing the updater, delete the test copy, its data folder and the test disk
   images, and make sure no test copy is left in Login Items.
+- To test a login launch without logging out, open the app with
+  `NSWorkspace.openApplicationAtURL_configuration_completionHandler_` and a configuration
+  whose `appleEvent` is `oapp` with `keyAEPropData` ('prdt') set to the enum 'lgit', which
+  is what loginwindow sends. From source, open Python.app with `main.py` as its argument.
 - Claude's shell can't take screenshots or click menus. To see what the app decided,
   read its log. To drive something only a menu or a wake can trigger, add a temporary
   hook to a scratch copy of the source (not the repository) and build from that.
@@ -127,6 +139,9 @@ Don't undo these without asking:
   there's a switch in Settings.
 - Open at login is turned on once, the first time the app runs from Applications.
   Turning it off sticks.
+- At login the app starts in the menu bar only, whatever *Open this window at launch*
+  says; that setting covers opening the app by hand. Opening the app again while it
+  runs in the background shows the dashboard.
 - The dashboard window opens as tall as the page, up to the screen's height, and can't
   be made wider or taller than the page needs: extra size only added empty space.
   Switching tabs resizes it to the new page.

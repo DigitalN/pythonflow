@@ -24,6 +24,11 @@ BACKGROUND_ARGUMENT = "--background"
 
 # SMAppServiceStatus
 _ENABLED = 1
+# The "open application" Apple event macOS sends at launch carries this property
+# when loginwindow opened the app as a login item.
+_OPEN_APPLICATION = int.from_bytes(b"oapp", "big")  # kAEOpenApplication
+_PROPERTY_DATA = int.from_bytes(b"prdt", "big")  # keyAEPropData
+_LAUNCHED_AS_LOGIN_ITEM = int.from_bytes(b"lgit", "big")  # keyAELaunchedAsLogInItem
 
 
 def bundle_path():
@@ -39,6 +44,18 @@ def in_applications_folder(path):
     resolved = str(Path(path).resolve())
     folders = ("/Applications/", str(Path.home() / "Applications") + "/")
     return resolved.startswith(folders)
+
+
+def launched_at_login():
+    """True when macOS opened the app as a login item. Only meaningful while the launch's
+    "open application" event is being handled, i.e. as the app finishes launching."""
+    from Foundation import NSAppleEventManager
+
+    event = NSAppleEventManager.sharedAppleEventManager().currentAppleEvent()
+    if event is None or event.eventID() != _OPEN_APPLICATION:
+        return False
+    reason = event.paramDescriptorForKeyword_(_PROPERTY_DATA)
+    return reason is not None and reason.enumCodeValue() == _LAUNCHED_AS_LOGIN_ITEM
 
 
 def activate_app():

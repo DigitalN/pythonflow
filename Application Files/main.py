@@ -9,9 +9,11 @@ request is the daily update check (updater.py). All data stays in
 ~/Library/Application Support/Pythonflow.
 """
 
+import ctypes
 import fcntl
 import logging
 import os
+import signal
 import sys
 import threading
 import time
@@ -74,6 +76,12 @@ def _acquire_single_instance_lock():
         handle.close()
         return None
     return handle  # held open (and locked) for the life of the process
+
+
+def _is_webkit_gpu_process(pid):
+    path = ctypes.create_string_buffer(4096)
+    found = ctypes.CDLL("/usr/lib/libproc.dylib").proc_pidpath(pid, path, len(path)) > 0
+    return found and path.value.endswith(b"/com.apple.WebKit.GPU")
 
 
 class LiveState:
@@ -237,6 +245,8 @@ class PythonflowApp:
             self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
             is_busy=self._busy_for_update, on_status=self._on_update_status, quit_app=self.quit)
         self._window = None
+        self._html = None
+        self._gpu_pid = 0  # WebKit's graphics process for the page, as last seen
         self._page_size = None  # (width, height) the dashboard page last asked for
         self._statusbar = None
         self._quitting = False
@@ -251,6 +261,7 @@ class PythonflowApp:
         self._recorder.feed(sample)
         if self._statusbar is not None:
             AppHelper.callAfter(self._statusbar.update, sample, self._settings.get())
+            AppHelper.callAfter(self._check_graphics_process)
 
     def _page_settings(self):
         """Settings plus "open at login" (None where it isn't available, e.g. from source)."""
@@ -333,6 +344,36 @@ class PythonflowApp:
         self._window.show()
         self._fit_window(grow=True)
 
+    def _finish_launching(self, show):
+        """Runs as the app finishes launching, while macOS's "open application" event is
+        still current: the only moment a login launch can be told apart. At login the
+        dashboard stays hidden, whatever the setting says."""
+        import launch
+
+        at_login = launch.launched_at_login()
+        if show and not at_login:
+            self.show_dashboard()
+        log.info("Pythonflow %s started (dashboard %s%s)", VERSION,
+                 "shown" if show and not at_login else "hidden", ", opened at login" if at_login else "")
+
+    def _check_graphics_process(self):
+        """WebKit draws the page in a helper process. When that hangs, WebKit gives up on
+        it but macOS doesn't let it kill the helper, so the page stays tied to it: a blank
+        window until the app quits. That happened at login, with the helper stuck setting
+        up audio. Finish the job, and the page reconnects to a new helper."""
+        view = self._window.native.contentView() if self._window and self._window.native else None
+        if view is None or not view.respondsToSelector_("_gpuProcessIdentifier"):
+            return
+        pid = view._gpuProcessIdentifier()
+        old, self._gpu_pid = self._gpu_pid, pid
+        if old and pid != old and _is_webkit_gpu_process(old):
+            log.warning("WebKit's graphics process stopped responding; ending it")
+            os.kill(old, signal.SIGKILL)
+
+    def _reload_page(self):
+        log.warning("WebKit's process for the dashboard page quit; reloading the page")
+        self._window.load_html(self._html, "")
+
     def _busy_for_update(self):
         """Don't relaunch into an update while the dashboard is open or a charge is
         being recorded (a session in progress lives in memory until it ends)."""
@@ -361,15 +402,22 @@ class PythonflowApp:
         self._quitting = True
         AppKit.NSApp.terminate_(None)
 
-    def _install_quit_handler(self):
-        """Make ⌘Q in the dashboard quit the app instead of just hiding the window.
+    def _install_delegate_methods(self):
+        """Add to pywebview's delegates.
 
-        pywebview's app delegate asks each window's `closing` handlers before
-        terminating, and ours cancels closes (to hide the window instead).
-        Replace that delegate method so a real quit request always wins.
+        ⌘Q in the dashboard quits the app instead of just hiding the window. pywebview's
+        app delegate asks each window's `closing` handlers before terminating, and ours
+        cancels closes (to hide the window instead), so a real quit request must win.
+
+        Opening Pythonflow again while it runs in the background (from Finder, Spotlight
+        or Launchpad) shows the dashboard. Otherwise nothing would seem to happen.
+
+        If WebKit's process for the page quits (a crash, or macOS reclaiming memory),
+        the page is loaded again instead of staying blank.
         """
         import AppKit
         import objc
+        from PyObjCTools import AppHelper
         from webview.platforms import cocoa
 
         app = self
@@ -378,7 +426,22 @@ class PythonflowApp:
             app._quitting = True
             return AppKit.NSTerminateNow
 
-        objc.classAddMethods(cocoa.BrowserView.AppDelegate, [applicationShouldTerminate_])
+        def reopen(self, sender, has_visible_windows):
+            if has_visible_windows:
+                return True  # AppKit brings the dashboard forward
+            app.show_dashboard()
+            return False
+
+        def web_process_quit(self, webview):
+            AppHelper.callAfter(app._reload_page)
+
+        objc.classAddMethods(cocoa.BrowserView.AppDelegate, [
+            applicationShouldTerminate_,
+            objc.selector(reopen, selector=b"applicationShouldHandleReopen:hasVisibleWindows:", signature=b"Z@:@Z"),
+        ])
+        objc.classAddMethods(cocoa.BrowserView.BrowserDelegate, [
+            objc.selector(web_process_quit, selector=b"webViewWebContentProcessDidTerminate:", signature=b"v@:@"),
+        ])
 
     def _background_color(self):
         import AppKit
@@ -409,17 +472,16 @@ class PythonflowApp:
             if launch.offer_to_move(self._app_path):
                 return  # the copy in Applications starts once this one has quit
 
-        prefs = self._settings.get()
-        # Relaunching into an update shouldn't pop the dashboard up.
-        start_hidden = not prefs["open_dashboard_at_launch"] or launch.BACKGROUND_ARGUMENT in sys.argv
-        if start_hidden:
-            AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-        self._install_quit_handler()
+        # The window starts hidden, and _finish_launching shows it unless this is a login
+        # launch. Relaunching into an update shouldn't pop the dashboard up either.
+        show = self._settings.get()["open_dashboard_at_launch"] and launch.BACKGROUND_ARGUMENT not in sys.argv
+        AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        self._install_delegate_methods()
 
-        html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
+        self._html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
         self._window = webview.create_window(
-            APP_NAME, html=html, js_api=Api(self), width=WINDOW_WIDTH, height=self._initial_height(),
-            min_size=(860, 600), hidden=start_hidden, background_color=self._background_color(),
+            APP_NAME, html=self._html, js_api=Api(self), width=WINDOW_WIDTH, height=self._initial_height(),
+            min_size=(860, 600), hidden=True, background_color=self._background_color(),
         )
         self._window.events.closing += self._on_closing
         # Non-locking pywebview events fire on a worker thread; AppKit needs the main one.
@@ -433,7 +495,12 @@ class PythonflowApp:
         self._login_item.turn_on_by_default()
         self._updater.start()
 
-        log.info("Pythonflow %s started (dashboard %s)", VERSION, "hidden" if start_hidden else "shown")
+        if AppKit.NSRunningApplication.currentApplication().isFinishedLaunching():  # e.g. after offer_to_move
+            AppHelper.callAfter(self._finish_launching, show)
+        else:
+            AppKit.NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
+                AppKit.NSApplicationDidFinishLaunchingNotification, None, None,
+                lambda notification: self._finish_launching(show))
         webview.start(private_mode=True, debug=False)
         os._exit(0)
 
