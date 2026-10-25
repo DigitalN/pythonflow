@@ -445,6 +445,23 @@ const fmtW = (v, d = 1) => isNum(v) ? `${v.toFixed(d)} W` : '—';
 const fmtNum = (v, unit = '', d = 0) => isNum(v) ? `${v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d })}${unit}` : '—';
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+// The once-a-second writes go through put(), which skips a value the element already
+// shows: rewriting the same text, markup, class or style still makes WebKit restyle,
+// lay out and repaint that part of the page. An element written through put() must
+// only be written through put(), or its record of what's shown goes stale.
+const shown = new WeakMap();
+function put(el, prop, value) {
+  if (typeof el === 'string') el = $(el);
+  let last = shown.get(el);
+  if (!last) shown.set(el, last = {});
+  if (last[prop] === value) return;
+  last[prop] = value;
+  if (prop === 'text') el.textContent = value;
+  else if (prop === 'html') el.innerHTML = value;
+  else if (prop === 'class') el.className = value;
+  else el.style.setProperty(prop, value);
+}
+
 function fmtDuration(minutes) {
   if (!isNum(minutes)) return '—';
   const h = Math.floor(minutes / 60), m = Math.round(minutes % 60);
@@ -535,14 +552,28 @@ function drawChart(canvas, opts) {
     ctx.fillText(xLabel(t), x(t), H - pad.b + 6);
   }
 
-  // series
+  // series, at most one point per device pixel: each column two device pixels wide
+  // keeps only its highest and lowest point, in time order, so peaks still show
+  const colWidth = 2 / dpr;
   for (const s of visible) {
-    ctx.beginPath(); let started = false;
+    ctx.beginPath();
+    let started = false, col = null, upI, upX, upY, downI, downX, downY;
+    const to = (px, py) => { if (started) ctx.lineTo(px, py); else { ctx.moveTo(px, py); started = true; } };
+    const flush = () => {
+      if (col === null) return;
+      if (upI === downI) to(upX, upY);
+      else if (upI < downI) { to(upX, upY); to(downX, downY); }
+      else { to(downX, downY); to(upX, upY); }
+      col = null;
+    };
     s.values.forEach((v, i) => {
-      if (!isNum(v) || xs[i] < xMin) { started = false; return; }
-      const px = x(xs[i]), py = y(v);
-      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+      if (!isNum(v) || xs[i] < xMin) { flush(); started = false; return; }
+      const px = x(xs[i]), py = y(v), c = Math.floor(px / colWidth);
+      if (c !== col) { flush(); col = c; upI = downI = i; upX = downX = px; upY = downY = py; }
+      else if (py < upY) { upI = i; upX = px; upY = py; }
+      else if (py > downY) { downI = i; downX = px; downY = py; }
     });
+    flush();
     ctx.strokeStyle = s.color; ctx.lineWidth = 1.75; ctx.lineJoin = 'round'; ctx.stroke();
     if (s.fill) {
       ctx.lineTo(x(xs[xs.length - 1]), y(Math.max(yMin, 0))); ctx.lineTo(x(Math.max(xs[0], xMin)), y(Math.max(yMin, 0)));
@@ -552,7 +583,7 @@ function drawChart(canvas, opts) {
 
   // hover crosshair + tooltip
   const tip = opts.tip;
-  if (state.hoverX == null || !xs.length || state.hoverX < pad.l || state.hoverX > W - pad.r) { if (tip) tip.style.display = 'none'; return; }
+  if (state.hoverX == null || !xs.length || state.hoverX < pad.l || state.hoverX > W - pad.r) { if (tip) put(tip, 'display', 'none'); return; }
   const tHover = xMin + (state.hoverX - pad.l) / pw * (xMax - xMin);
   let idx = 0, best = Infinity;
   xs.forEach((t, i) => { const d = Math.abs(t - tHover); if (d < best) { best = d; idx = i; } });
@@ -563,11 +594,11 @@ function drawChart(canvas, opts) {
     ctx.beginPath(); ctx.arc(hx, y(v), 3.5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill();
   }
   if (tip) {
-    tip.innerHTML = `<div class="faint" style="margin-bottom:3px">${esc(opts.tipTitle(xs[idx]))}</div>` +
-      visible.map(s => `<div class="row"><i style="background:${s.color}"></i>${esc(s.name)}<b class="num">${esc(s.format(s.values[idx]))}</b></div>`).join('');
-    tip.style.display = 'block';
+    put(tip, 'html', `<div class="faint" style="margin-bottom:3px">${esc(opts.tipTitle(xs[idx]))}</div>` +
+      visible.map(s => `<div class="row"><i style="background:${s.color}"></i>${esc(s.name)}<b class="num">${esc(s.format(s.values[idx]))}</b></div>`).join(''));
+    put(tip, 'display', 'block');
     const tw = tip.offsetWidth;
-    tip.style.left = `${hx + 12 + tw > W ? hx - tw - 12 : hx + 12}px`; tip.style.top = `${pad.t + 4}px`;
+    put(tip, 'left', `${hx + 12 + tw > W ? hx - tw - 12 : hx + 12}px`); put(tip, 'top', `${pad.t + 4}px`);
   }
 }
 function niceStep(raw) {
@@ -602,45 +633,46 @@ function statusOf(s) {
 function renderNow() {
   const s = latest; if (!s) return;
   const st = statusOf(s);
-  $('top-dot').className = `dot ${st.dot}`; $('top-status').textContent = st.text;
+  put('top-dot', 'class', `dot ${st.dot}`); put('top-status', 'text', st.text);
+  if (activeTab !== 'now') return;  // the rest is on the Now page, which renders when shown
 
   // hero
   const lvl = s.battery_level;
-  $('hero-level').innerHTML = isNum(lvl) ? `${lvl}<small>%</small>` : '—';
-  $('hero-state').textContent = st.text.split(' · ')[0];
-  $('hero-sub').textContent = st.text.includes(' · ') ? st.text.split(' · ')[1] : (s.has_battery ? '' : 'No internal battery');
-  $('hero-gauge').className = `gauge ${st.dot}`;
-  $('hero-gauge').firstElementChild.style.width = `${isNum(lvl) ? lvl : 0}%`;
-  $('hero-gauge').style.display = s.has_battery ? '' : 'none';
+  put('hero-level', 'html', isNum(lvl) ? `${lvl}<small>%</small>` : '—');
+  put('hero-state', 'text', st.text.split(' · ')[0]);
+  put('hero-sub', 'text', st.text.includes(' · ') ? st.text.split(' · ')[1] : (s.has_battery ? '' : 'No internal battery'));
+  put('hero-gauge', 'class', `gauge ${st.dot}`);
+  put($('hero-gauge').firstElementChild, 'width', `${isNum(lvl) ? lvl : 0}%`);
+  put('hero-gauge', 'display', s.has_battery ? '' : 'none');
   const a = s.adapter;
-  $('hero-chip').innerHTML = s.external_connected
+  put('hero-chip', 'html', s.external_connected
     ? `<span class="muted">Power source</span><b>${esc(a?.name || 'Power adapter')}</b><span class="muted num">${[a?.voltage && `${a.voltage} V`, a?.current && `${a.current} A`].filter(Boolean).join(' · ') || '&nbsp;'}</span>`
-    : `<span class="muted">Power source</span><b>Battery</b><span class="muted num">${isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '&nbsp;'}</span>`;
+    : `<span class="muted">Power source</span><b>Battery</b><span class="muted num">${isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '&nbsp;'}</span>`);
 
   // flow
   const inW = s.external_connected ? s.adapter_power : null;
   const bp = s.battery_power;
   $('n-adapter').classList.toggle('off', !s.external_connected);
-  $('n-adapter-val').textContent = s.external_connected ? fmtW(inW) : 'Unplugged';
-  $('n-adapter-extra').textContent = a?.watts ? `${a.watts} W rated` : '';
-  $('n-mac-val').textContent = fmtW(s.system_load);
+  put('n-adapter-val', 'text', s.external_connected ? fmtW(inW) : 'Unplugged');
+  put('n-adapter-extra', 'text', a?.watts ? `${a.watts} W rated` : '');
+  put('n-mac-val', 'text', fmtW(s.system_load));
   $('n-battery').classList.toggle('off', !s.has_battery);
-  $('n-battery-val').textContent = isNum(lvl) ? `${lvl}%` : '—';
-  $('n-battery-extra').textContent = isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '';
+  put('n-battery-val', 'text', isNum(lvl) ? `${lvl}%` : '—');
+  put('n-battery-extra', 'text', isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '');
 
   setPipe('p-in', s.external_connected ? s.system_in : 0, false, '--charge');
-  $('l-in').textContent = s.external_connected ? fmtW(s.system_in) : ' ';
-  $('l-in-note').textContent = s.external_connected && s.efficiency_loss > 0.05 ? `${fmtW(s.efficiency_loss)} conversion loss` : '';
+  put('l-in', 'text', s.external_connected ? fmtW(s.system_in) : ' ');
+  put('l-in-note', 'text', s.external_connected && s.efficiency_loss > 0.05 ? `${fmtW(s.efficiency_loss)} conversion loss` : '');
 
   const charging = isNum(bp) && bp > 0.05, draining = isNum(bp) && bp < -0.05;
   setPipe('p-batt', isNum(bp) ? Math.abs(bp) : 0, draining, draining ? '--drain' : '--charge');
-  $('l-batt').textContent = charging || draining ? fmtW(Math.abs(bp)) : ' ';
-  $('l-batt-note').textContent = charging ? 'charging' : draining ? 'from battery' : (s.has_battery ? 'idle' : '');
+  put('l-batt', 'text', charging || draining ? fmtW(Math.abs(bp)) : ' ');
+  put('l-batt-note', 'text', charging ? 'charging' : draining ? 'from battery' : (s.has_battery ? 'idle' : ''));
 
   // breakdown of system load
   const screen = s.screen_power, chip = s.chip_power, total = s.system_load;
   const hasParts = isNum(total) && total > 0 && (isNum(screen) || isNum(chip));
-  $('breakdown').style.display = hasParts ? '' : 'none';
+  put('breakdown', 'display', hasParts ? '' : 'none');
   if (hasParts) {
     const other = Math.max(0, total - (screen || 0) - (chip || 0));
     const parts = [
@@ -649,12 +681,17 @@ function renderNow() {
       ['Everything else', other, '--system', 'Memory, storage, Wi-Fi, fans, speakers and other components.'],
     ].filter(p => isNum(p[1]));
     const sum = parts.reduce((acc, p) => acc + Math.max(0, p[1]), 0) || 1;
-    $('stack').innerHTML = parts.map(p => `<div title="${esc(p[3])}" style="width:${Math.max(0, p[1]) / sum * 100}%;background:var(${p[2]})"></div>`).join('');
-    $('stack-legend').innerHTML = parts.map(p => `<span title="${esc(p[3])}"><i style="background:var(${p[2]})"></i>${esc(p[0])}<b>${fmtW(p[1])}</b></span>`).join('');
+    // Rebuilt only when the parts change; otherwise just the widths and values are written.
+    put('stack', 'html', parts.map(p => `<div title="${esc(p[3])}" style="background:var(${p[2]})"></div>`).join(''));
+    put('stack-legend', 'html', parts.map(p => `<span title="${esc(p[3])}"><i style="background:var(${p[2]})"></i>${esc(p[0])}<b></b></span>`).join(''));
+    parts.forEach((p, i) => {
+      put($('stack').children[i], 'width', `${(Math.max(0, p[1]) / sum * 100).toFixed(1)}%`);
+      put($('stack-legend').children[i].lastElementChild, 'text', fmtW(p[1]));
+    });
   }
 
   // details
-  $('d-health').textContent = isNum(s.health_pct) ? `${Math.min(100, s.health_pct).toFixed(1)}%` : '—';
+  put('d-health', 'text', isNum(s.health_pct) ? `${Math.min(100, s.health_pct).toFixed(1)}%` : '—');
   kv('d-battery', [
     ['Cycle count', fmtNum(s.cycle_count)],
     ['Charge', s.current_capacity && s.max_capacity ? `${fmtNum(s.current_capacity)} / ${fmtNum(s.max_capacity)} mAh` : '—'],
@@ -682,14 +719,18 @@ function renderNow() {
 }
 
 function setPipe(id, watts, reverse, colorVar) {
-  const el = $(id), w = isNum(watts) ? watts : 0;
+  const el = $(id), w = isNum(watts) ? watts : 0, dpr = window.devicePixelRatio || 1;
   el.classList.toggle('on', w > 0.05); el.classList.toggle('rev', !!reverse);
-  el.style.setProperty('--pipe-color', `var(${colorVar})`);
-  el.style.height = `${Math.min(8, 3 + Math.log2(1 + w) * 0.75)}px`;
+  put(el, '--pipe-color', `var(${colorVar})`);
+  // In whole device pixels: finer steps can't be seen, but each one is a relayout.
+  put(el, 'height', `${Math.round(Math.min(8, 3 + Math.log2(1 + w) * 0.75) * dpr) / dpr}px`);
 }
 
 function kv(id, rows) {
-  $(id).innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  // Rebuilt only when the rows change; otherwise just the values that changed are written.
+  put(id, 'html', rows.map(([k]) => `<dt>${esc(k)}</dt><dd></dd>`).join(''));
+  const el = $(id);
+  rows.forEach(([, v], i) => put(el.children[i * 2 + 1], 'text', v));
 }
 
 function renderToggles() {
@@ -767,7 +808,7 @@ $('tabs').addEventListener('click', e => {
   for (const el of $('tabs').children) el.setAttribute('aria-selected', el === b);
   for (const p of document.querySelectorAll('.page')) p.classList.toggle('active', p.id === `page-${activeTab}`);
   $('main').scrollTop = 0;
-  if (activeTab === 'now') renderLiveChart();
+  if (activeTab === 'now') { renderNow(); renderLiveChart(); }
   if (activeTab === 'history') loadSessions();
   if (activeTab === 'settings') renderSettings();
 });

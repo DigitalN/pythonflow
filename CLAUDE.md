@@ -84,9 +84,11 @@ To reproduce without touching the user's data, run with
   dashboard or the menu raises the main thread to user-interactive: with every core
   busy, a background thread waited up to 1.6 s for a turn (measured). Samples are
   scheduled from when they were due, since background waits end ~90 ms late.
-- **Only pass real changes to AppKit.** A new menu bar title costs about 0.9 ms of
-  redraw, and setting the same one again still costs 0.2 ms (measured). The menu's
-  rows are only filled in while it's open.
+- **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
+  0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
+  menu's rows are only filled in while it's open. On the page, the once-a-second
+  writes go through `put()`, which skips values already shown, and the Now page only
+  renders while it's the active tab. Charts draw at most one point per device pixel.
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
   the fans stay at minimum.
