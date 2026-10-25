@@ -1,6 +1,51 @@
-"""Menu bar text formatting (pure functions; no status item is created)."""
+"""Menu bar text formatting, and what an update touches. No status item is created:
+the update test swaps in a stand-in for it."""
 
-from statusbar import FIGURE_SPACE, battery_status, format_watts, menu_bar_value
+from types import SimpleNamespace
+
+import statusbar
+from statusbar import FIGURE_SPACE, StatusBar, battery_status, format_watts, menu_bar_value
+
+
+class _FakeButton:
+    def __init__(self):
+        self.titles = []
+
+    def setTitle_(self, title):
+        self.titles.append(title)
+
+    def __getattr__(self, name):  # setFont_, setImage_ and the rest: ignored
+        return lambda *args: None
+
+
+def test_update_only_redraws_what_changed(monkeypatch):
+    button = _FakeButton()
+    item = SimpleNamespace(button=lambda: button, setMenu_=lambda menu: None)
+    monkeypatch.setattr(statusbar, "NSStatusBar", SimpleNamespace(
+        systemStatusBar=lambda: SimpleNamespace(statusItemWithLength_=lambda length: item)))
+    menu_events = []
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None,
+                    on_menu_open=lambda: menu_events.append(bar.menu_open))
+    system_row = bar._rows["system"]
+    settings = {"menu_bar_metric": "system"}
+    sample = {"system_load": 7.04, "screen_power": 2.0, "chip_power": 3.0, "has_battery": True,
+              "battery_level": 80}
+
+    bar.update(sample, settings)
+    bar.update({**sample, "system_load": 6.98}, settings)  # still "7.0 W"
+    assert button.titles == ["— W", f"{FIGURE_SPACE}7.0 W"]
+    assert system_row.attributedTitle().string() == "System\t—"  # menu closed: rows untouched
+
+    bar._target.menuNeedsUpdate_(bar._menu)  # what AppKit calls as the menu opens
+    bar._target.menuWillOpen_(bar._menu)
+    assert system_row.attributedTitle().string() == "System\t7.0 W"
+    bar.update({**sample, "system_load": 9.5}, settings)
+    assert system_row.attributedTitle().string() == "System\t9.5 W"  # open: rows follow along
+
+    bar._target.menuDidClose_(bar._menu)
+    bar.update({**sample, "system_load": 12.0}, settings)
+    assert system_row.attributedTitle().string() == "System\t9.5 W"
+    assert menu_events == [True, False]
 
 
 def test_title_width_is_stable():

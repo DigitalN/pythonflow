@@ -66,7 +66,8 @@ def menu_bar_value(sample, settings):
 
 
 class _MenuTarget(NSObject):
-    """Receives menu item actions and forwards them to Python callbacks."""
+    """Receives menu item actions and the menu's delegate calls, and forwards them to
+    Python callbacks."""
 
     def openDashboard_(self, sender):
         self.on_open()
@@ -77,15 +78,25 @@ class _MenuTarget(NSObject):
     def quitApp_(self, sender):
         self.on_quit()
 
+    def menuNeedsUpdate_(self, menu):
+        self.on_menu_needs_update()
+
+    def menuWillOpen_(self, menu):
+        self.on_menu_open(True)
+
+    def menuDidClose_(self, menu):
+        self.on_menu_open(False)
+
 
 class StatusBar:
-    def __init__(self, on_open, on_check_updates, on_quit):
+    def __init__(self, on_open, on_check_updates, on_quit, on_menu_open):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self._button = self._item.button()
         size = NSFont.menuBarFontOfSize_(0).pointSize()
         self._button.setFont_(NSFont.monospacedDigitSystemFontOfSize_weight_(size, AppKit.NSFontWeightRegular))
         self._button.setImagePosition_(AppKit.NSImageLeading)
-        self._button.setTitle_(format_watts(None))
+        self._title = format_watts(None)
+        self._button.setTitle_(self._title)
         self._button.setToolTip_("Pythonflow")
 
         bolt = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt.fill", "Charging")
@@ -99,6 +110,11 @@ class StatusBar:
         self._target.on_open = on_open
         self._target.on_check_updates = on_check_updates
         self._target.on_quit = on_quit
+        self._target.on_menu_needs_update = self._fill_rows
+        self._target.on_menu_open = self._set_menu_open
+        self._on_menu_open = on_menu_open
+        self._sample = None  # the latest, for filling in the rows when the menu opens
+        self.menu_open = False
 
         self._menu_font = NSFont.menuFontOfSize_(0)
         self._value_font = NSFont.monospacedDigitSystemFontOfSize_weight_(
@@ -110,7 +126,9 @@ class StatusBar:
 
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
+        menu.setDelegate_(self._target)
         self._rows = {}
+        self._row_values = {}
         for key in ROWS:
             row = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(ROW_LABELS[key], None, "")
             row.setEnabled_(False)
@@ -132,6 +150,9 @@ class StatusBar:
         return item
 
     def _set_row(self, key, value):
+        if self._row_values.get(key) == value:
+            return
+        self._row_values[key] = value
         text = f"{ROW_LABELS[key]}\t{value}"
         title = AppKit.NSMutableAttributedString.alloc().initWithString_attributes_(text, {
             NSFontAttributeName: self._menu_font,
@@ -156,12 +177,30 @@ class StatusBar:
         self._update_item.setEnabled_(enabled)
 
     def update(self, sample, settings):
-        charging_title = settings.get("menu_bar_show_charging") and sample.get("is_charging")
-        self._button.setTitle_(format_watts(menu_bar_value(sample, settings)))
-        if bool(charging_title) != self._showing_bolt and self._bolt:
+        """Called for every sample. A new title costs a redraw (about 0.9 ms, measured)
+        and even setting the same one again costs 0.2 ms, so only changes go through.
+        The menu's rows are only filled in while it's open."""
+        charging_title = bool(settings.get("menu_bar_show_charging") and sample.get("is_charging"))
+        title = format_watts(menu_bar_value(sample, settings))
+        if title != self._title:
+            self._button.setTitle_(title)
+            self._title = title
+        if charging_title != self._showing_bolt and self._bolt:
             self._button.setImage_(self._bolt if charging_title else None)
-            self._showing_bolt = bool(charging_title)
+            self._showing_bolt = charging_title
 
+        self._sample = sample
+        if self.menu_open:
+            self._fill_rows()
+
+    def _set_menu_open(self, is_open):
+        self.menu_open = is_open
+        self._on_menu_open()
+
+    def _fill_rows(self):
+        sample = self._sample
+        if sample is None:
+            return
         self._set_row("battery", battery_status(sample))
         self._set_row("system", format_watts(sample.get("system_load"), pad_to=0))
         self._set_row("screen", format_watts(sample.get("screen_power"), pad_to=0))

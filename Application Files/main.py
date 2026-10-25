@@ -84,6 +84,23 @@ def _is_webkit_gpu_process(pid):
     return found and path.value.endswith(b"/com.apple.WebKit.GPU")
 
 
+# <sys/qos.h>. On Apple silicon only background QoS keeps a thread on the efficiency
+# cores; utility and above use the performance cores when they're free. The cost is
+# waiting: timed waits end ~90 ms late at background QoS (~50 ms at utility), so they
+# coalesce with other wakeups, and with every core busy a background thread waited up
+# to 1.6 s for a turn, against 0.1 s at utility (measured on an M1 Pro).
+QOS_CLASS_USER_INTERACTIVE = 0x21
+QOS_CLASS_UTILITY = 0x11
+QOS_CLASS_BACKGROUND = 0x09
+
+
+def _set_thread_qos(qos_class):
+    """Set the calling thread's QoS. Only a thread can change its own."""
+    err = ctypes.CDLL("/usr/lib/libSystem.B.dylib").pthread_set_qos_class_self_np(qos_class, 0)
+    if err:
+        log.warning("Couldn't set thread QoS %#x (error %d)", qos_class, err)
+
+
 class LiveState:
     """Latest sample plus a ring buffer of chart points, shared with the page."""
 
@@ -131,17 +148,33 @@ class Sampler(threading.Thread):
         if was_background:
             self._wake.set()  # sample now rather than at the end of a 2.5 s wait
 
+    def qos(self):
+        """Menu bar only: background QoS, on the efficiency cores. While the dashboard is
+        watched, utility, so a busy Mac can't stall the chart for seconds."""
+        return QOS_CLASS_BACKGROUND if self.interval() == BACKGROUND_INTERVAL else QOS_CLASS_UTILITY
+
+    def next_due(self, due):
+        """One interval after the last sample was due, not after it ran: waits end up to
+        ~90 ms late at background QoS, and that mustn't stretch the interval."""
+        return max(due + self.interval(), time.monotonic() + 0.05)
+
     def run(self):
         import objc
 
+        qos = None
+        due = time.monotonic()
         while True:
-            started = time.monotonic()
+            if self.qos() != qos:
+                qos = self.qos()
+                _set_thread_qos(qos)
             with objc.autorelease_pool():
                 try:
                     self._on_sample(self._reader.read())
                 except Exception:
                     log.exception("Sampling failed")
-            self._wake.wait(max(0.05, self.interval() - (time.monotonic() - started)))
+            due = self.next_due(due)
+            if self._wake.wait(due - time.monotonic()):
+                due = time.monotonic()
             self._wake.clear()
 
 
@@ -249,6 +282,8 @@ class PythonflowApp:
         self._gpu_pid = 0  # WebKit's graphics process for the page, as last seen
         self._page_size = None  # (width, height) the dashboard page last asked for
         self._statusbar = None
+        self._dashboard_shown = False
+        self._main_qos = None
         self._quitting = False
         self._settings.on_change(self._on_settings_changed)
 
@@ -260,8 +295,8 @@ class PythonflowApp:
         self._live.push(sample)
         self._recorder.feed(sample)
         if self._statusbar is not None:
-            AppHelper.callAfter(self._statusbar.update, sample, self._settings.get())
-            AppHelper.callAfter(self._check_graphics_process)
+            # One trip to the main thread per sample: each one wakes it.
+            AppHelper.callAfter(self._show_sample, sample, self._settings.get())
 
     def _page_settings(self):
         """Settings plus "open at login" (None where it isn't available, e.g. from source)."""
@@ -275,6 +310,20 @@ class PythonflowApp:
         AppHelper.callAfter(self._apply_theme, values["theme"])
 
     # ── window lifecycle (main thread) ──
+
+    def _show_sample(self, sample, settings):
+        self._statusbar.update(sample, settings)
+        self._check_graphics_process()
+
+    def _update_main_qos(self):
+        """With only the menu bar item showing, the main thread (which redraws it) runs
+        at background QoS, on the efficiency cores. With the dashboard or the menu open,
+        it's back at user-interactive."""
+        in_use = self._dashboard_shown or (self._statusbar is not None and self._statusbar.menu_open)
+        qos = QOS_CLASS_USER_INTERACTIVE if in_use else QOS_CLASS_BACKGROUND
+        if qos != self._main_qos:
+            _set_thread_qos(qos)
+            self._main_qos = qos
 
     def _apply_theme(self, theme):
         import AppKit
@@ -339,6 +388,8 @@ class PythonflowApp:
     def show_dashboard(self):
         import AppKit
 
+        self._dashboard_shown = True
+        self._update_main_qos()
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
         self._apply_theme(self._settings.get()["theme"])
         self._window.show()
@@ -353,6 +404,8 @@ class PythonflowApp:
         at_login = launch.launched_at_login()
         if show and not at_login:
             self.show_dashboard()
+        else:
+            self._update_main_qos()
         log.info("Pythonflow %s started (dashboard %s%s)", VERSION,
                  "shown" if show and not at_login else "hidden", ", opened at login" if at_login else "")
 
@@ -393,6 +446,8 @@ class PythonflowApp:
             return True
         self._window.hide()
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        self._dashboard_shown = False
+        self._update_main_qos()
         return False
 
     def quit(self):
@@ -489,7 +544,7 @@ class PythonflowApp:
             self._apply_theme, self._settings.get()["theme"])
 
         self._statusbar = StatusBar(on_open=self.show_dashboard, on_check_updates=self._updater.check_now,
-                                    on_quit=self.quit)
+                                    on_quit=self.quit, on_menu_open=self._update_main_qos)
         self._sampler.start()
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
         self._login_item.turn_on_by_default()
