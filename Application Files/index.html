@@ -389,6 +389,16 @@ dialog .actions { justify-content: flex-end; }
         </div>
       </div>
 
+      <div class="group" id="s-battery-group">
+        <h3>Battery</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Charge limit<div class="hint">macOS can stop charging at 80%, or anywhere up to 100%, to help the battery last longer. It's set in System Settings → Battery → Battery Health &amp; Charging.</div></div>
+            <button class="btn" id="s-charge-limit">Open in System Settings</button>
+          </div>
+        </div>
+      </div>
+
       <div class="group">
         <h3>History</h3>
         <div class="card">
@@ -930,6 +940,7 @@ async function renderSettings() {
   $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
   $('s-update').checked = settings.update_automatically;
   $('s-record').checked = settings.record_history;
+  $('s-battery-group').hidden = latest?.has_battery === false;  // a desktop Mac has no charge limit
   const info = await call('app_info');
   const noUpdates = info.update_unavailable_reason;
   $('s-update').disabled = !!noUpdates;
@@ -955,6 +966,7 @@ $('s-update').onchange = e => save({ update_automatically: e.target.checked });
 $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
 $('s-reveal').onclick = () => call('reveal_data_folder');
+$('s-charge-limit').onclick = () => call('open_charging_settings');
 $('s-clear').onclick = async () => {
   if (!await confirmDialog('Delete all charging history?', 'Every recorded charging session will be permanently removed from this Mac.', 'Delete All')) return;
   const n = await call('clear_history');

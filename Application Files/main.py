@@ -45,6 +45,9 @@ LIVE_BUFFER_POINTS = 900  # 15 minutes at the dashboard interval
 # The page then reports its exact size (Api.set_content_size); this just avoids a jump.
 WINDOW_WIDTH = 1060
 NOW_PAGE_HEIGHT = 1040
+# System Settings → Battery → Battery Health & Charging, where macOS's charge limit
+# (80–100%) is set. "batteryhealth" is that sheet's anchor in the Battery pane.
+CHARGING_SETTINGS_URL = "x-apple.systempreferences:com.apple.Battery-Settings.extension?batteryhealth"
 
 log = logging.getLogger("pythonflow")
 
@@ -239,6 +242,13 @@ class Api:
 
         url = NSURL.fileURLWithPath_(str(DATA_DIR))
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().activateFileViewerSelectingURLs_, [url])
+
+    def open_charging_settings(self):
+        """The charge limit belongs to macOS, so the page links to where it's set."""
+        from AppKit import NSURL, NSWorkspace
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(CHARGING_SETTINGS_URL))
 
     def app_info(self):
         return {"version": VERSION, "data_dir": str(DATA_DIR), "log_path": str(LOG_PATH),
