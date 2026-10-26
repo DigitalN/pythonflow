@@ -1,7 +1,7 @@
 # Pythonflow
 
 Building, the release checklist, how updates work, and testing the updater are in
-@DEVELOPMENT.md.
+@docs/DEVELOPMENT.md.
 
 ## Debugging
 
@@ -52,7 +52,7 @@ To reproduce without touching the user's data, run with
 - **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/Pythonflow.spec`
   in `~/Library/Caches/Pythonflow-build` and signs the app. `scripts/install.sh` installs
   it in `/Applications`; `scripts/package.sh` makes the release disk image. The
-  `.command` files are double-click wrappers around `install.sh`.
+  `.command` files in `scripts/` are double-click wrappers around `install.sh`.
 
 ## Key rules
 

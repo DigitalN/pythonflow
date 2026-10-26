@@ -1,22 +1,22 @@
 # Developing Pythonflow
 
 Notes for building Pythonflow from source and publishing releases. For installing and
-using it, see the [README](README.md). The architecture and the rules the code follows
-are in [CLAUDE.md](CLAUDE.md).
+using it, see the [README](../README.md). The architecture and the rules the code follows
+are in [CLAUDE.md](../CLAUDE.md).
 
 ## Build from source
 
 You need Python 3 from [python.org](https://www.python.org/downloads/) and the pinned
-packages in `Application Files/requirements.txt` (`First Time Setup.command` installs
-them). Then:
+packages in `Application Files/requirements.txt` (`scripts/First Time Setup.command`
+installs them). Then:
 
 ```bash
 scripts/install.sh
 ```
 
 This builds `Pythonflow.app`, signs it with your **Apple Development** certificate,
-installs it to `/Applications` and launches it. `Build Pythonflow.command` does the same
-after pulling the latest code and running the tests.
+installs it to `/Applications` and launches it. `scripts/Build Pythonflow.command` does
+the same after pulling the latest code and running the tests.
 
 Without a certificate the build is signed ad hoc: it works, but it can't update itself.
 A free Apple ID is enough to get one: Xcode → Settings → Apple Accounts → sign in →
