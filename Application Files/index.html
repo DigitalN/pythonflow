@@ -221,8 +221,6 @@ select {
 .switch input:checked + span::after { transform: translateX(16px); }
 .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch input:disabled + span { opacity: .45; }
-ul.privacy { margin: 0; padding: 12px 0 12px 18px; }
-ul.privacy li { margin: 4px 0; }
 code { font: 12px ui-monospace, "SF Mono", Menlo, monospace; background: var(--seg-bg); padding: 1px 5px; border-radius: 4px; user-select: text; -webkit-user-select: text; }
 
 dialog {
@@ -414,22 +412,10 @@ dialog .actions { justify-content: flex-end; }
       </div>
 
       <div class="group">
-        <h3>Privacy</h3>
-        <div class="card">
-          <ul class="privacy">
-            <li>Pythonflow's only connection to the internet is the update check: once a day it asks GitHub for the latest release, and downloads it if it's new. No analytics or crash reporting, and no local server or open ports.</li>
-            <li>It only reads power sensors (the battery registry and SMC). It doesn't read serial numbers or your computer's name.</li>
-            <li>Charging history and settings stay in <code id="s-data-dir">~/Library/Application Support/Pythonflow</code>.</li>
-          </ul>
-          <div class="srow"><div class="lbl muted">Log file: <code id="s-log-path"></code></div><button class="btn" id="s-reveal">Show in Finder</button></div>
-        </div>
-      </div>
-
-      <div class="group">
         <h3>About</h3>
         <div class="card">
           <div class="srow"><div class="lbl">Version</div><div class="muted num" id="s-version"></div></div>
-          <div class="srow"><div class="lbl muted"><b>Pythonflow</b> is a Python rewrite of Powerflow by Samuel Lyon (lzt1008), with the macOS 27 fixes. MIT License.</div></div>
+          <div class="srow"><div class="lbl muted">Log file: <code id="s-log-path"></code></div><button class="btn" id="s-reveal">Show in Finder</button></div>
         </div>
       </div>
     </div>
@@ -947,7 +933,6 @@ async function renderSettings() {
   $('s-update-hint').textContent = noUpdates ? `Not available: ${noUpdates}.`
     : 'Checks GitHub once a day, after your Mac wakes, and installs new versions when you\'re not using your Mac.';
   $('s-version').textContent = info.version;
-  $('s-data-dir').textContent = info.data_dir.replace(/^\/Users\/[^/]+/, '~');
   $('s-log-path').textContent = info.log_path.replace(/^\/Users\/[^/]+/, '~');
   const list = await call('list_sessions');
   $('s-history-count').textContent = `${list.length} session${list.length === 1 ? '' : 's'} stored`;
