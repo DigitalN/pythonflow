@@ -40,7 +40,7 @@ Anyway**. You only do this once: Pythonflow isn't distributed through Apple, so 
 hasn't checked it. All of its code is in this repository.
 
 Tested on macOS 27.0 with Apple silicon. To build from source, see
-[DEVELOPMENT.md](DEVELOPMENT.md).
+[DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Privacy
 

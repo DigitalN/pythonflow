@@ -6,7 +6,7 @@
 # ═══════════════════════════════════════════════════════════════
 
 set -e
-PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
@@ -58,7 +58,7 @@ echo "  ✓ Setup complete! Pythonflow is running in the menu bar."
 echo ""
 echo "  It opens at login and keeps itself up to date; you can"
 echo "  turn either off in its Settings."
-echo "  To rebuild your own changes: double-click 'Build Pythonflow.command'"
+echo "  To rebuild your own changes: double-click 'Build Pythonflow.command' in scripts"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
