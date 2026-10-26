@@ -16,7 +16,7 @@ APP=$(scripts/build.sh)
 # Installed copies only take updates signed by their own team, so a release must be too.
 TEAM=$(codesign -d --verbose=2 "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')
 if [[ -z "$TEAM" || "$TEAM" == "not set" ]]; then
-    echo "Releases must be signed with an Apple Development certificate (see DEVELOPMENT.md)." >&2
+    echo "Releases must be signed with an Apple Development certificate (see docs/DEVELOPMENT.md)." >&2
     exit 1
 fi
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
