@@ -23,6 +23,8 @@ to is GitHub, to update itself.
 - **Live chart** of the last 1, 5 or 15 minutes.
 - **Battery details**: maximum capacity (health), cycle count, charge in mAh,
   temperature, voltage and current.
+- **Charge limit shortcut**: a button in Settings opens macOS's charge limit, to stop
+  charging at 80% or go back to 100%.
 - **Charger details**: name, rated watts, and negotiated voltage and current.
 - **Charging history**: each charge's levels, duration, power curve and averages.
   Export any session to CSV.
