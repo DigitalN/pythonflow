@@ -1,50 +1,30 @@
 # Pythonflow
 
 A macOS menu bar app that shows where your Mac's power goes: what the charger
-delivers, what the Mac uses, and what goes into or comes out of the battery.
-It also keeps a history of every charge.
+delivers, what the Mac uses, and what goes into or out of the battery. It also keeps
+a history of every charge.
+
+A Python rewrite of [Powerflow](https://github.com/lzt1008/powerflow), which crashes on
+macOS 27 and is no longer maintained.
 
 ![Pythonflow dashboard](docs/screenshot.png)
-
-Pythonflow is a Python rewrite of [Powerflow](https://github.com/lzt1008/powerflow)
-(originally Rust/Tauri/Vue). The original crashes on launch on macOS 27 and is no
-longer maintained. This version fixes those problems, and the only thing it connects
-to is GitHub, to update itself.
 
 **[⬇︎ Download the latest version](https://github.com/DigitalN/pythonflow/releases/latest)**
 (free, for Macs with Apple silicon)
 
 ## Features
 
-- **Live wattage in the menu bar**: system power, screen, or chip. While charging
-  it can show the charger's input instead. Click it for a quick summary.
-- **Power flow**: charger → Mac → battery, including the charger's conversion loss
-  and a breakdown of where the Mac's power goes.
+- **Menu bar wattage**: system, screen or chip power, or the charger's input while
+  charging. Click it for a quick summary.
+- **Power flow** from charger to Mac to battery, with the charger's conversion loss and
+  where the Mac's power goes.
 - **Live chart** of the last 1, 5 or 15 minutes.
-- **Battery details**: maximum capacity (health), cycle count, charge in mAh,
-  temperature, voltage and current.
-- **Charge limit shortcut**: a button in Settings opens macOS's charge limit, to stop
-  charging at 80% or go back to 100%.
-- **Charger details**: name, rated watts, and negotiated voltage and current.
-- **Charging history**: each charge's levels, duration, power curve and averages.
-  Export any session to CSV.
-- Light and dark mode. It lives in the menu bar, and the Dock icon only appears
-  while the dashboard window is open.
+- **Battery and charger details**: battery health, cycle count, temperature, voltage and
+  current, and the charger's rating and negotiated voltage.
+- **Charging history**: each charge's levels, duration and power curve, exportable to CSV.
+- A shortcut to macOS's charge limit, in Settings.
 - Opens at login, straight to the menu bar, and keeps itself up to date. Both can be
   turned off in Settings.
-
-## Privacy
-
-- **Its only connection is the update check.** Once a day, after your Mac wakes, it
-  asks GitHub for the latest release and downloads it if it's new. It installs only
-  an app signed by the same developer. There are no analytics or crash reports, and
-  no local web server. The dashboard runs under a Content-Security-Policy that blocks
-  all connections.
-- **Reads power sensors only**: the battery registry (`AppleSmartBattery`) and
-  the SMC power and temperature sensors. It doesn't read serial numbers or your
-  computer's name.
-- **Your data stays on your Mac** in `~/Library/Application Support/Pythonflow`.
-  You can turn off history recording or delete it all in Settings.
 
 ## Install
 
@@ -56,53 +36,47 @@ to is GitHub, to update itself.
 
 The first time you open it, macOS may say it can't verify Pythonflow. Click **Done**,
 then go to **System Settings → Privacy & Security**, scroll down, and click **Open
-Anyway**. You only do this once. It's needed because Pythonflow is free and isn't
-distributed through Apple, so Apple hasn't checked it; all of its code is on this page.
+Anyway**. You only do this once: Pythonflow isn't distributed through Apple, so Apple
+hasn't checked it. All of its code is in this repository.
 
-Pythonflow is tested on macOS 27.0 with Apple silicon. To build it from source
-instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Tested on macOS 27.0 with Apple silicon. To build from source, see
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
-### Coming from the original Powerflow
+## Privacy
 
-On first launch, your charging history and preferences from the old app are
-copied over. The old database is opened read-only and never changed. After that
-you can delete the old `/Applications/powerflow.app`.
+- **The only connection is the update check**: once a day, after your Mac wakes, it asks
+  GitHub for the latest release. It only installs updates signed by the same developer.
+  No analytics, crash reports or web server.
+- **It reads power and temperature sensors only**, never serial numbers or your
+  computer's name.
+- **Your data stays on your Mac**, in `~/Library/Application Support/Pythonflow`. You can
+  turn off history recording or delete it in Settings.
 
 ## What the numbers mean
 
 | Reading | What it is |
 |---|---|
-| **System** | Total power the Mac is using right now |
-| **Adapter in** | Power going from the charger into the Mac. The Adapter box also adds the charger's conversion loss. |
-| **Battery** | Power going into the battery (positive) or coming out of it (negative) |
+| **System** | Total power the Mac is using |
+| **Adapter in** | Power from the charger into the Mac. The Adapter box adds the charger's conversion loss. |
+| **Battery** | Power into the battery (positive) or out of it (negative) |
 | **Screen** | Display backlight. On mini-LED screens it rises with bright content. |
-| **Chip (CPU + GPU)** | The Apple silicon chip. Apple's sensor for it is named after the heatpipe that cools the chip, but it measures the chip, not the heatpipe or the fans. |
-| **Time to full / remaining** | macOS's own estimate. It's rough above ~80% charge, where charging slows down. |
+| **Chip (CPU + GPU)** | The Apple silicon chip. Apple names the sensor after the heatpipe, but it measures the chip. |
+| **Time to full / remaining** | macOS's own estimate, rough above about 80%, where charging slows down |
 
-## What was fixed for macOS 27
+## Coming from Powerflow
 
-| Problem in the original | Fix |
-|---|---|
-| Crashed about half a second after launch | macOS 27 removed several battery readings the app required. Every reading is now optional, and nothing in the sampling code can bring the app down. |
-| Battery health and capacity were blank | Reads the values from their new location, with a fallback for older macOS |
-| Showed "charging" while sitting at 100% | Trusts the battery's own fully-charged flag over a sensor that gets stuck |
-| Showed "1092 hours" remaining | "Still estimating" placeholder values are shown as "calculating…" |
-| Menu bar panel wouldn't open | Uses a native macOS menu |
-| Menu bar text kept changing width | Fixed-width digits |
-| Chart froze after upgrading | Saved settings are validated when loaded |
+Pythonflow fixes the original's problems on macOS 27: the crash at launch, blank battery
+health, "charging" at 100%, "1092 hours" remaining, the menu bar panel that wouldn't open,
+and the chart freezing after an upgrade.
 
-## Development
-
-Building from source, the release checklist and how updates work are in
-[DEVELOPMENT.md](DEVELOPMENT.md). See [CLAUDE.md](CLAUDE.md) for the architecture and
-the rules the code follows.
+On first launch it copies over your charging history and preferences, reading the old
+database without changing it. You can then delete `/Applications/powerflow.app`.
 
 ## Credits
 
 Based on [Powerflow](https://github.com/lzt1008/powerflow) by The Powerflow Team
 (Samuel Lyon / lzt1008). The macOS 27 fixes build on diagnoses from community pull
-requests to the original project:
-[#19](https://github.com/lzt1008/powerflow/pull/19),
+requests [#19](https://github.com/lzt1008/powerflow/pull/19),
 [#21](https://github.com/lzt1008/powerflow/pull/21) and
 [#22](https://github.com/lzt1008/powerflow/pull/22).
 
