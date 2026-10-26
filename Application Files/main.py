@@ -251,7 +251,7 @@ class Api:
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(CHARGING_SETTINGS_URL))
 
     def app_info(self):
-        return {"version": VERSION, "data_dir": str(DATA_DIR), "log_path": str(LOG_PATH),
+        return {"version": VERSION, "log_path": str(LOG_PATH),
                 "history_recording": self._app._settings.get()["record_history"],
                 "update_unavailable_reason": self._app._updater.unavailable_reason}
 
