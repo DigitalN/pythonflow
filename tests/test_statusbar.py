@@ -66,6 +66,19 @@ def test_battery_status_states():
     assert battery_status({"battery_level": None}) == "No battery"
 
 
+def test_battery_status_with_a_charge_limit():
+    base = {"battery_level": 63, "time_remaining_min": 12, "fully_charged": False,
+            "is_charging": True, "external_connected": True, "charge_limit": 80}
+    assert battery_status(base) == "63% · 0:12 to 80%"
+    assert battery_status({**base, "battery_level": 78, "is_charging": False,
+                           "at_charge_limit": True}) == "78% · Held at 80% limit"
+    assert battery_status({**base, "is_charging": False}) == "63% · Not charging"
+    # Whatever limit is set in System Settings is the one named.
+    assert battery_status({**base, "charge_limit": 85}) == "63% · 0:12 to 85%"
+    assert battery_status({**base, "battery_level": 85, "is_charging": False, "charge_limit": 85,
+                           "at_charge_limit": True}) == "85% · Held at 85% limit"
+
+
 def test_menu_bar_value_prefers_adapter_input_while_charging():
     s = {"is_charging": True, "system_in": 105.0, "system_load": 27.0, "screen_power": 11.0}
     assert menu_bar_value(s, {"menu_bar_show_charging": True, "menu_bar_metric": "system"}) == 105.0

@@ -45,9 +45,9 @@ LIVE_BUFFER_POINTS = 900  # 15 minutes at the dashboard interval
 # The page then reports its exact size (Api.set_content_size); this just avoids a jump.
 WINDOW_WIDTH = 1060
 NOW_PAGE_HEIGHT = 1040
-# System Settings → Battery → Battery Health & Charging, where macOS's charge limit
-# (80–100%) is set. "batteryhealth" is that sheet's anchor in the Battery pane.
-CHARGING_SETTINGS_URL = "x-apple.systempreferences:com.apple.Battery-Settings.extension?batteryhealth"
+# System Settings → Battery → Charging, where macOS's charge limit (80–100%) is set.
+# "charging" is that sheet's anchor in the Battery pane; "batteryhealth" opens Battery Health.
+CHARGING_SETTINGS_URL = "x-apple.systempreferences:com.apple.Battery-Settings.extension?charging"
 
 log = logging.getLogger("pythonflow")
 

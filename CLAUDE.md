@@ -36,7 +36,8 @@ To reproduce without touching the user's data, run with
 - **Updates**: `Application Files/updater.py`. Daily check of GitHub releases after
   a wake, signature check, swap and relaunch. See *How updates work* in DEVELOPMENT.md.
 - **Sensors**: `Application Files/power.py`. Reads IOKit `AppleSmartBattery`
-  (ctypes + PyObjC bridging) and the SMC (ctypes `IOConnectCallStructMethod`).
+  (ctypes + PyObjC bridging) and the SMC (ctypes `IOConnectCallStructMethod`), plus
+  the charge limit from powerd's `/Library/Preferences/com.apple.powerd.charging.plist`.
   `normalize()` is pure and unit-tested with captured registry dicts.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). Main thread only.

@@ -38,15 +38,18 @@ def format_minutes(minutes):
 
 
 def battery_status(sample):
-    """Short human status, e.g. '63% · 1:04 to full'."""
+    """Short human status, e.g. '63% · 1:04 to full', or '63% · 0:12 to 80%' with a charge limit."""
     level = sample.get("battery_level")
     if level is None:
         return "No battery"
     remaining = format_minutes(sample.get("time_remaining_min"))
+    limit = sample.get("charge_limit")
     if sample.get("fully_charged"):
         state = "Fully charged"
     elif sample.get("is_charging"):
-        state = f"{remaining} to full" if remaining else "Charging"
+        state = f"{remaining} to {f'{limit}%' if limit else 'full'}" if remaining else "Charging"
+    elif sample.get("at_charge_limit"):
+        state = f"Held at {limit}% limit"
     elif sample.get("external_connected"):
         state = "Not charging"
     else:

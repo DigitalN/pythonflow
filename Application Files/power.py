@@ -2,7 +2,8 @@
 
 Read-only. Uses public IOKit registry properties plus SMC sensor keys — no
 private frameworks, no root, no network. Serial numbers and other identifying
-registry values are never read.
+registry values are never read. The charge limit set in System Settings comes
+from powerd's world-readable charging prefs.
 
 Two sources, because neither is complete on its own:
   - SMC updates every second: system/adapter/screen/chip power, battery temp.
@@ -19,6 +20,8 @@ key as optional so a future schema change degrades a field instead of the app.
 import ctypes
 import ctypes.util
 import logging
+import os
+import plistlib
 import struct
 import time
 
@@ -29,13 +32,19 @@ log = logging.getLogger(__name__)
 # Registry keys we read. Deliberately excludes Serial, AdapterDetails.SerialString, etc.
 BATTERY_KEYS = (
     "AdapterDetails", "Amperage", "AppleRawCurrentCapacity", "AppleRawMaxCapacity",
-    "AvgTimeToEmpty", "AvgTimeToFull", "BatteryData", "CurrentCapacity", "CycleCount",
-    "DesignCapacity", "ExternalConnected", "FullyCharged", "InstantAmperage", "IsCharging",
-    "MaxCapacity", "PowerTelemetryData", "Temperature", "TimeRemaining", "UpdateTime", "Voltage",
+    "AvgTimeToEmpty", "AvgTimeToFull", "BatteryData", "ChargerData", "CurrentCapacity",
+    "CycleCount", "DesignCapacity", "ExternalConnected", "FullyCharged", "InstantAmperage",
+    "IsCharging", "MaxCapacity", "PowerTelemetryData", "Temperature", "TimeRemaining",
+    "UpdateTime", "Voltage",
 )
 ADAPTER_KEYS = ("Name", "Description", "Watts", "AdapterVoltage", "Current", "IsWireless")
 BATTERY_DATA_KEYS = ("DesignCapacity", "FullChargeCapacity", "RemainingCapacity")
+CHARGER_DATA_KEYS = ("NotChargingReason",)
 TELEMETRY_KEYS = ("AdapterEfficiencyLoss", "BatteryPower", "SystemLoad", "SystemPowerIn")
+NOT_CHARGING_AT_LIMIT = 1 << 24  # NotChargingReason bit powerd sets while the charge limit holds
+
+# Where macOS keeps the charge limit set in System Settings → Battery → Charging.
+CHARGING_PREFS = "/Library/Preferences/com.apple.powerd.charging.plist"
 
 SMC_KEYS = (
     "PDTR",  # power delivered from the adapter into the system (W)
@@ -145,8 +154,32 @@ def read_battery_registry():
     # Keep only the nested fields we use, so nothing identifying is ever held.
     props["AdapterDetails"] = _pick(props.get("AdapterDetails"), ADAPTER_KEYS)
     props["BatteryData"] = _pick(props.get("BatteryData"), BATTERY_DATA_KEYS)
+    props["ChargerData"] = _pick(props.get("ChargerData"), CHARGER_DATA_KEYS)
     props["PowerTelemetryData"] = _pick(props.get("PowerTelemetryData"), TELEMETRY_KEYS)
     return props
+
+
+def parse_charge_limit(data):
+    """macOS's charge limit (a percentage below 100) from powerd's charging prefs, or None.
+
+    The prefs hold an NSKeyedArchiver list of ChargeCtrlPolicy objects; plistlib reads
+    the archive without unarchiving it. Only the limit set in System Settings counts
+    (reason "manualChargeLimit"), not Optimized Battery Charging's temporary hold.
+    """
+    try:
+        objects = plistlib.loads(plistlib.loads(data)["policies"])["$objects"]
+        for obj in objects:
+            if not isinstance(obj, dict) or obj.get("terminated"):
+                continue
+            reason = obj.get("reason")
+            if isinstance(reason, plistlib.UID):
+                reason = objects[reason.data]
+            limit = obj.get("soclimit")
+            if reason == "manualChargeLimit" and type(limit) is int and 50 <= limit < 100:
+                return limit
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        pass  # missing, or a format this version doesn't know: show no limit
+    return None
 
 
 # ── SMC ───────────────────────────────────────────────────────────────────
@@ -340,11 +373,12 @@ def _is_charging(b, smc):
     return smc.get("CHCC", 0) > 0
 
 
-def normalize(battery, smc, now=None):
+def normalize(battery, smc, now=None, charge_limit=None):
     """Merge a battery registry dict and SMC values into one sample.
 
     Power values are watts. `battery_power` is signed: positive while charging,
     negative while the battery is powering the Mac. Missing data is None.
+    `charge_limit` is macOS's charge limit (see parse_charge_limit), or None.
     """
     now = time.time() if now is None else now
     b = battery or {}
@@ -396,8 +430,24 @@ def normalize(battery, smc, now=None):
         raw_temp = _num(b.get("Temperature"))  # pre-27 registry: centi-degrees
         temperature = raw_temp / 100 if raw_temp else None
 
+    limit = charge_limit if has_battery and charge_limit else None
+    reason = _num((b.get("ChargerData") or {}).get("NotChargingReason")) or 0
+    # powerd sets this the moment the limit is reached, while the current is still
+    # winding down and IsCharging lags behind.
+    at_limit = bool(limit and external and reason & NOT_CHARGING_AT_LIMIT)
+    if at_limit:
+        charging = False
+
     minutes = None
-    if has_battery and not fully_charged and (charging or not external):
+    if has_battery and not fully_charged and charging and limit:
+        # macOS's own estimates count to 100% even when the limit stops charging
+        # sooner. Below about 80% a battery charges at a steady current, so the
+        # charge still to go over the averaged current is close; above that the
+        # current tapers, and re-estimating every sample lengthens it as it does.
+        charge_ma = _positive(b.get("Amperage")) or _positive(b.get("InstantAmperage"))
+        if full_mah and charge_ma and level is not None:
+            minutes = _valid_minutes(max(limit - level, 1) / 100 * full_mah / charge_ma * 60)
+    elif has_battery and not fully_charged and (charging or not external):
         candidates = [b.get("TimeRemaining")]
         if charging:
             candidates += [b.get("AvgTimeToFull"), smc.get("B0TF")]
@@ -427,6 +477,8 @@ def normalize(battery, smc, now=None):
         "fully_charged": fully_charged,
         "external_connected": external,
         "battery_level": level,
+        "charge_limit": limit,
+        "at_charge_limit": at_limit,
         "time_remaining_min": minutes,
         "system_load": _round(system_load),
         "system_in": _round(system_in),
@@ -456,6 +508,8 @@ class PowerReader:
         self._battery = None
         self._battery_read_at = 0.0
         self._last_external = None
+        self._charge_limit = None
+        self._charging_prefs_mtime = None
         self._open_smc()
 
     def _open_smc(self):
@@ -481,6 +535,26 @@ class PowerReader:
             self._smc_retry_at = time.monotonic() + SMC_RETRY_SECONDS
             return {}
 
+    def _read_charge_limit(self):
+        """Re-read powerd's charging prefs only when the file has changed."""
+        try:
+            mtime = os.stat(CHARGING_PREFS).st_mtime_ns
+        except OSError:
+            mtime = None
+        if mtime == self._charging_prefs_mtime:
+            return
+        self._charging_prefs_mtime = mtime
+        limit = None
+        if mtime is not None:
+            try:
+                with open(CHARGING_PREFS, "rb") as f:
+                    limit = parse_charge_limit(f.read())
+            except Exception:
+                log.exception("Reading the charge limit failed")
+        if limit != self._charge_limit:
+            log.info("Charge limit: %s", f"{limit}%" if limit else "none")
+            self._charge_limit = limit
+
     def read(self):
         with objc.autorelease_pool():
             smc = self._read_smc()
@@ -493,6 +567,7 @@ class PowerReader:
                     self._battery = read_battery_registry()
                 except Exception:
                     log.exception("Reading AppleSmartBattery failed")
+                self._read_charge_limit()
                 self._battery_read_at = time.monotonic()
                 self._last_external = external_hint
-            return normalize(self._battery, smc)
+            return normalize(self._battery, smc, charge_limit=self._charge_limit)

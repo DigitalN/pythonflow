@@ -391,7 +391,7 @@ dialog .actions { justify-content: flex-end; }
         <h3>Battery</h3>
         <div class="card">
           <div class="srow">
-            <div class="lbl">Charge limit<div class="hint">macOS can stop charging at 80%, or anywhere up to 100%, to help the battery last longer. It's set in System Settings → Battery → Battery Health &amp; Charging.</div></div>
+            <div class="lbl">Charge limit<div class="hint">macOS can stop charging at 80%, or anywhere up to 100%, to help the battery last longer. It's set in System Settings → Battery → Charging.</div></div>
             <button class="btn" id="s-charge-limit">Open in System Settings</button>
           </div>
         </div>
@@ -621,7 +621,9 @@ function statusOf(s) {
   if (!s.has_battery) return { dot: 'idle', text: s.external_connected ? 'On power adapter' : 'Desktop Mac' };
   const t = s.time_remaining_min;
   if (s.fully_charged) return { dot: 'idle', text: 'Fully charged' };
-  if (s.is_charging) return { dot: 'charge', text: isNum(t) ? `Charging · ${fmtDuration(t)} to full` : 'Charging · calculating…' };
+  const to = s.charge_limit ? `${s.charge_limit}%` : 'full';
+  if (s.is_charging) return { dot: 'charge', text: isNum(t) ? `Charging · ${fmtDuration(t)} to ${to}` : 'Charging · calculating…' };
+  if (s.at_charge_limit) return { dot: 'idle', text: `Plugged in · held at ${s.charge_limit}% limit` };
   if (s.external_connected) return { dot: 'idle', text: 'Plugged in, not charging' };
   return { dot: 'drain', text: isNum(t) ? `On battery · ${fmtDuration(t)} remaining` : 'On battery · calculating…' };
 }
