@@ -1,11 +1,12 @@
 """normalize() against registry shapes seen on real Macs, plus SMC decoding."""
 
+import plistlib
 import struct
 
 import pytest
 
 import power
-from power import decode_smc_value, normalize
+from power import decode_smc_value, normalize, parse_charge_limit
 
 # AppleSmartBattery on macOS 27.0 (26A428), M1 Pro, charging on a 140 W adapter.
 # AppleRaw*, DesignCapacity, AbsoluteCapacity and Temperature are gone from the top level.
@@ -109,6 +110,77 @@ def test_plugged_in_not_charging_has_no_time_remaining():
     battery = {**MACOS_27, "IsCharging": False, "InstantAmperage": 0, "Amperage": 0}
     s = normalize(battery, {**SMC_CHARGING, "CHCC": 0.0}, now=1.0)
     assert s["external_connected"] and not s["is_charging"]
+    assert s["time_remaining_min"] is None
+
+
+def _charging_prefs(soclimit=80, reason="manualChargeLimit", terminated=False):
+    """powerd's charging prefs as macOS 27.0.1 writes them, UUIDs zeroed."""
+    uid = plistlib.UID
+    archive = {
+        "$archiver": "NSKeyedArchiver", "$version": 100000, "$top": {"root": uid(1)},
+        "$objects": [
+            "$null",
+            {"$class": uid(7), "NS.objects": [uid(2)]},
+            {"$class": uid(6), "drain": True, "isEndOfCharge": True, "noChargeToFull": False,
+             "owner": 51041, "reason": uid(3), "soclimit": soclimit, "terminated": terminated,
+             "token": uid(4)},
+            reason,
+            {"$class": uid(5), "NS.uuidbytes": bytes(16)},
+            {"$classes": ["NSUUID", "NSObject"], "$classname": "NSUUID"},
+            {"$classes": ["ChargeCtrlPolicy", "NSObject"], "$classname": "ChargeCtrlPolicy"},
+            {"$classes": ["NSMutableArray", "NSArray", "NSObject"], "$classname": "NSMutableArray"},
+        ],
+    }
+    policies = plistlib.dumps(archive, fmt=plistlib.FMT_BINARY)
+    return plistlib.dumps({"bootSessionUUID": "00000000-0000-0000-0000-000000000000",
+                           "policies": policies}, fmt=plistlib.FMT_BINARY)
+
+
+def test_charge_limit_is_read_from_powerd_prefs():
+    assert parse_charge_limit(_charging_prefs()) == 80
+    assert parse_charge_limit(_charging_prefs(soclimit=95)) == 95
+
+
+def test_charge_limit_ignores_everything_but_a_manual_limit_below_100():
+    assert parse_charge_limit(_charging_prefs(soclimit=100)) is None
+    assert parse_charge_limit(_charging_prefs(reason="optimizedBatteryCharging")) is None
+    assert parse_charge_limit(_charging_prefs(terminated=True)) is None
+    assert parse_charge_limit(plistlib.dumps({"bootSessionUUID": "x"})) is None
+    assert parse_charge_limit(b"not a plist") is None
+    assert parse_charge_limit(b"") is None
+
+
+def test_time_to_full_counts_to_the_charge_limit():
+    # 40% to 80% of 7798 mAh at an averaged 8566 mA is 21.8 minutes, not macOS's 77 to 100%.
+    s = normalize(MACOS_27, SMC_CHARGING, now=1.0, charge_limit=80)
+    assert s["charge_limit"] == 80 and not s["at_charge_limit"]
+    assert s["time_remaining_min"] == 22
+    assert normalize(MACOS_27, SMC_CHARGING, now=1.0)["time_remaining_min"] == 77
+
+
+def test_time_to_limit_is_about_a_minute_once_it_is_reached():
+    battery = {**MACOS_27, "CurrentCapacity": 80}
+    assert normalize(battery, SMC_CHARGING, now=1.0, charge_limit=80)["time_remaining_min"] == 1
+
+
+def test_held_at_charge_limit():
+    battery = {**MACOS_27, "IsCharging": False, "InstantAmperage": 0, "Amperage": 0,
+               "CurrentCapacity": 78, "ChargerData": {"NotChargingReason": 0x1000000}}
+    s = normalize(battery, {**SMC_CHARGING, "CHCC": 0.0}, now=1.0, charge_limit=80)
+    assert s["at_charge_limit"] and not s["is_charging"]
+    assert s["time_remaining_min"] is None
+    # Not charging for another reason (here 0x80), or with no limit set: not held by it.
+    other = {**battery, "ChargerData": {"NotChargingReason": 0x80}}
+    assert not normalize(other, SMC_CHARGING, now=1.0, charge_limit=80)["at_charge_limit"]
+    assert not normalize(battery, SMC_CHARGING, now=1.0)["at_charge_limit"]
+
+
+def test_reaching_the_limit_stops_charging_before_the_current_winds_down():
+    # Seen at 80%: the limit bit is set while IsCharging and the current still say charging.
+    battery = {**MACOS_27, "CurrentCapacity": 80, "Amperage": 900, "InstantAmperage": 900,
+               "ChargerData": {"NotChargingReason": 0x1000000}}
+    s = normalize(battery, SMC_CHARGING, now=1.0, charge_limit=80)
+    assert s["at_charge_limit"] and not s["is_charging"]
     assert s["time_remaining_min"] is None
 
 

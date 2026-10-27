@@ -61,7 +61,7 @@ Tested on macOS 27.0 with Apple silicon. To build from source, see
 | **Battery** | Power into the battery (positive) or out of it (negative) |
 | **Screen** | Display backlight. On mini-LED screens it rises with bright content. |
 | **Chip (CPU + GPU)** | The Apple silicon chip. Apple names the sensor after the heatpipe, but it measures the chip. |
-| **Time to full / remaining** | macOS's own estimate, rough above about 80%, where charging slows down |
+| **Time to full / remaining** | macOS's own estimate, rough above about 80%, where charging slows down. With a charge limit set, the time to the limit instead, since macOS's estimate counts to 100%. |
 
 ## Coming from Powerflow
 
