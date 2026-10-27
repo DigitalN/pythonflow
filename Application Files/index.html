@@ -196,6 +196,7 @@ table.ap th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .btn:hover { filter: brightness(.96); }
 .btn.primary { background: var(--accent); color: #fff; }
 .btn.danger { color: var(--danger); }
+.btn:disabled { opacity: .45; filter: none; cursor: default; }
 
 /* ── settings ────────────────────────────────── */
 .settings { max-width: 680px; margin: 0 auto; }
@@ -230,6 +231,13 @@ dialog {
 dialog::backdrop { background: rgba(0,0,0,.25); }
 dialog h3 { margin: 0 0 6px; font-size: 14px; }
 dialog p { margin: 0 0 16px; color: var(--muted); }
+dialog input {
+  display: block; width: 100%; box-sizing: border-box; margin: -4px 0 16px; padding: 6px 8px;
+  border: .5px solid var(--line-strong); border-radius: 6px; background: var(--bg); color: var(--text);
+  font: inherit; user-select: text; -webkit-user-select: text;
+}
+dialog input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+dialog input[hidden] { display: none; }
 dialog .actions { justify-content: flex-end; }
 .toast {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); opacity: 0;
@@ -384,6 +392,10 @@ dialog .actions { justify-content: flex-end; }
             <div class="lbl">Update automatically<div class="hint" id="s-update-hint"></div></div>
             <label class="switch"><input type="checkbox" id="s-update"><span></span></label>
           </div>
+          <div class="srow">
+            <div class="lbl">Check for updates<div class="hint" id="s-check-updates-hint"></div></div>
+            <button class="btn" id="s-check-updates">Check Now</button>
+          </div>
         </div>
       </div>
 
@@ -425,6 +437,7 @@ dialog .actions { justify-content: flex-end; }
 <dialog id="confirm">
   <h3 id="confirm-title"></h3>
   <p id="confirm-body"></p>
+  <input id="confirm-input" type="text" autocomplete="off" autocorrect="off" spellcheck="false" hidden>
   <div class="actions"><button class="btn" value="cancel" id="confirm-cancel">Cancel</button><button class="btn primary" id="confirm-ok">OK</button></div>
 </dialog>
 <div class="toast" id="toast"></div>
@@ -476,15 +489,25 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
-function confirmDialog(title, body, okLabel) {
+// With `typeToConfirm`, OK stays disabled until that word is typed, so a stray click
+// or Return can't confirm something that can't be undone.
+function confirmDialog(title, body, okLabel, typeToConfirm) {
   return new Promise(resolve => {
-    const d = $('confirm');
-    $('confirm-title').textContent = title; $('confirm-body').textContent = body; $('confirm-ok').textContent = okLabel;
-    const done = v => { d.close(); $('confirm-ok').onclick = $('confirm-cancel').onclick = null; resolve(v); };
-    $('confirm-ok').onclick = () => done(true);
+    const d = $('confirm'), ok = $('confirm-ok'), input = $('confirm-input');
+    $('confirm-title').textContent = title; $('confirm-body').textContent = body; ok.textContent = okLabel;
+    const typed = () => !typeToConfirm || input.value.trim().toLowerCase() === typeToConfirm;
+    const done = v => {
+      d.close(); ok.onclick = $('confirm-cancel').onclick = input.oninput = input.onkeydown = null; resolve(v);
+    };
+    input.hidden = !typeToConfirm; input.value = ''; input.placeholder = typeToConfirm || '';
+    ok.disabled = !typed();
+    input.oninput = () => { ok.disabled = !typed(); };
+    input.onkeydown = e => { if (e.key === 'Enter' && typed()) done(true); };
+    ok.onclick = () => { if (typed()) done(true); };
     $('confirm-cancel').onclick = () => done(false);
     d.oncancel = () => resolve(false);
     d.showModal();
+    if (typeToConfirm) input.focus();
   });
 }
 
@@ -790,6 +813,7 @@ async function poll() {
       }
       seq = r.seq;
       if (r.latest) { latest = r.latest; renderNow(); renderLiveChart(); }
+      if (r.update) { updateState = r.update; if (activeTab === 'settings') renderUpdateButton(); }
     }
   } catch (e) { console.error(e); }
   polling = false;
@@ -934,6 +958,10 @@ async function renderSettings() {
   $('s-update').disabled = !!noUpdates;
   $('s-update-hint').textContent = noUpdates ? `Not available: ${noUpdates}.`
     : 'Checks GitHub once a day, after your Mac wakes, and installs new versions when you\'re not using your Mac.';
+  updatesUnavailable = !!noUpdates;
+  $('s-check-updates-hint').textContent = noUpdates ? 'Opens the releases page, where you can download the latest version.'
+    : 'Checks GitHub now, and installs a new version right away.';
+  renderUpdateButton();
   $('s-version').textContent = info.version;
   $('s-log-path').textContent = info.log_path.replace(/^\/Users\/[^/]+/, '~');
   const list = await call('list_sessions');
@@ -954,8 +982,25 @@ $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
 $('s-reveal').onclick = () => call('reveal_data_folder');
 $('s-charge-limit').onclick = () => call('open_charging_settings');
+$('s-check-updates').onclick = () => call('check_for_updates');
+
+// Mirrors the menu's "Check for Updates…" item; the status arrives with each poll.
+let updateState = ['idle', null], updatesUnavailable = false;
+function renderUpdateButton() {
+  const [status, version] = updateState;
+  const [label, enabled] = updatesUnavailable ? ['Open Releases Page', true] : ({
+    checking: ['Checking…', false],
+    downloading: [`Downloading ${version}…`, false],
+    ready: [`Restart to Update to ${version}`, true],
+  })[status] || ['Check Now', true];
+  const b = $('s-check-updates');
+  put(b, 'text', label);
+  if (b.disabled === enabled) b.disabled = !enabled;
+}
 $('s-clear').onclick = async () => {
-  if (!await confirmDialog('Delete all charging history?', 'Every recorded charging session will be permanently removed from this Mac.', 'Delete All')) return;
+  if (!await confirmDialog('Delete all charging history?',
+    'Every recorded charging session will be permanently removed from this Mac. To confirm, type delete below.',
+    'Delete All', 'delete')) return;
   const n = await call('clear_history');
   selectedId = null; detail = null; toast(`Deleted ${n} session${n === 1 ? '' : 's'}`); renderSettings();
 };

@@ -147,8 +147,10 @@ To reproduce without touching the user's data, run with
 Don't undo these without asking:
 
 - Updates are checked once a day, only when the Mac wakes from sleep (plus **Check for
-  Updates…** in the menu), and installed silently at a quiet moment. On by default;
-  there's a switch in Settings.
+  Updates…** in the menu and **Check Now** in Settings), and installed silently at a quiet
+  moment. On by default; there's a switch in Settings.
+- **Delete All…** for charging history only goes ahead once "delete" is typed in its
+  confirmation. Deleting one session keeps the plain confirmation.
 - Open at login is turned on once, the first time the app runs from Applications.
   Turning it off sticks.
 - At login the app starts in the menu bar only, whatever *Open this window at launch*
