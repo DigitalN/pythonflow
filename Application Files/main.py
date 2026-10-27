@@ -193,7 +193,16 @@ class Api:
 
     def get_live(self, since_seq=0):
         self._app._sampler.dashboard_polled()
-        return self._app._live.since(int(since_seq or 0))
+        live = self._app._live.since(int(since_seq or 0))
+        # Settings' Check for Updates button follows a check through these polls.
+        live["update"] = [self._app._updater.status, self._app._updater.version]
+        return live
+
+    def check_for_updates(self):
+        """Settings' button does what "Check for Updates…" in the menu does."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._app._updater.check_now)
 
     def get_settings(self):
         return self._app._page_settings()

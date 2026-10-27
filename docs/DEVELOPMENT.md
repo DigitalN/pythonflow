@@ -116,7 +116,8 @@ certificate from the same Apple account before the old one expires.
 
 - **When:** once a day, the first time the Mac wakes from sleep (a minute after waking,
   so the network is back). A day counts once GitHub has answered; if the Mac was offline,
-  the next wake tries again. **Check for Updates…** in the menu checks right away.
+  the next wake tries again. **Check for Updates…** in the menu, or **Check Now** in
+  Settings, checks right away.
 - **What:** GitHub's
   [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
   through `/usr/bin/curl` (the bundled Python has no certificates of its own). Drafts and
@@ -131,7 +132,7 @@ certificate from the same Apple account before the old one expires.
   dashboard doesn't pop up).
 - **Off** for copies that run from source, aren't team-signed, aren't in an Applications
   folder, or can't replace themselves. Settings says why, and **Check for Updates…**
-  opens the releases page instead.
+  (**Open Releases Page** in Settings) opens the releases page instead.
 
 ## Testing the updater
 
