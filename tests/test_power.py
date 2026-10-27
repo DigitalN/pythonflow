@@ -138,6 +138,7 @@ def _charging_prefs(soclimit=80, reason="manualChargeLimit", terminated=False):
 
 def test_charge_limit_is_read_from_powerd_prefs():
     assert parse_charge_limit(_charging_prefs()) == 80
+    assert parse_charge_limit(_charging_prefs(soclimit=85)) == 85
     assert parse_charge_limit(_charging_prefs(soclimit=95)) == 95
 
 
