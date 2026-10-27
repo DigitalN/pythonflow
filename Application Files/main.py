@@ -23,7 +23,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 APP_NAME = "Pythonflow"
-VERSION = "1.2.4"  # the build reads it from here; see the release checklist in docs/DEVELOPMENT.md
+VERSION = "1.2.5"  # the build reads it from here; see the release checklist in docs/DEVELOPMENT.md
 if os.environ.get("PYTHONFLOW_DATA_DIR"):  # for development/testing against a throwaway folder
     DATA_DIR = Path(os.environ["PYTHONFLOW_DATA_DIR"]).expanduser()
     LOG_DIR = DATA_DIR / "Logs"
