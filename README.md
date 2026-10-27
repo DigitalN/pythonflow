@@ -22,7 +22,8 @@ macOS 27 and is no longer maintained.
 - **Battery and charger details**: battery health, cycle count, temperature, voltage and
   current, and the charger's rating and negotiated voltage.
 - **Charging history**: each charge's levels, duration and power curve, exportable to CSV.
-- A shortcut to macOS's charge limit, in Settings.
+- Works with macOS's charge limit: the time while charging counts to the limit, and
+  Settings has a shortcut to where it's set.
 - Opens at login, straight to the menu bar, and keeps itself up to date. Both can be
   turned off in Settings.
 
