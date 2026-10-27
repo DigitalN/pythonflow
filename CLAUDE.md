@@ -109,8 +109,10 @@ To reproduce without touching the user's data, run with
   the previous release, the README, and checking the live GitHub page afterwards.
 - Merging to `main` is not a release. If user-facing changes are merged but unreleased,
   say so: installed copies only update when a release is published.
-- Ask once before anything public on GitHub (publishing, drafting the previous release,
-  editing release notes or files, pushing to `main`), then do all of it.
+- When the maintainer says a pull request is merged, do the release straight away without
+  asking: the version bump on a `claude/release-<version>` branch, its pull request,
+  merging that yourself, then building, publishing, drafting the previous release and the
+  checks. Asking first only adds approvals.
 - Check each step's result before the next step that can't be undone. Don't chain a
   check and a publish with `&&`.
 - Releases are signed with the maintainer's Apple Development certificate (team
@@ -139,8 +141,9 @@ To reproduce without touching the user's data, run with
 
 ## Git
 
-- Work on a branch, not `main`. The maintainer opens pull requests with Create PR,
-  which needs a branch other than `main`.
+- Work on a branch, not `main`.
+- When the maintainer says to commit, also push and open the pull request, with Auto-fix
+  on. Don't ask about the PR separately.
 
 ## Decisions already made
 
