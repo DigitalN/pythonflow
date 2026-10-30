@@ -60,7 +60,7 @@ Tested on macOS 27.0 with Apple silicon. To build from source, see
 | **System** | Total power the Mac is using |
 | **Adapter in** | Power from the charger into the Mac. The Adapter box adds the charger's conversion loss. |
 | **Battery** | Power into the battery (positive) or out of it (negative) |
-| **Screen** | Display backlight. On mini-LED screens it rises with bright content. |
+| **Screen** | Display backlight. On mini-LED screens it rises with bright content. Not shown on a Mac with no screen sensor. |
 | **Chip (CPU + GPU)** | The Apple silicon chip. Apple names the sensor after the heatpipe, but it measures the chip. |
 | **Time to full / remaining** | macOS's own estimate, rough above about 80%, where charging slows down. With a charge limit set, the time to the limit instead, since macOS's estimate counts to 100%. |
 

@@ -18,11 +18,28 @@ class _FakeButton:
         return lambda *args: None
 
 
-def test_update_only_redraws_what_changed(monkeypatch):
+def _fake_status_item(monkeypatch):
     button = _FakeButton()
     item = SimpleNamespace(button=lambda: button, setMenu_=lambda menu: None)
     monkeypatch.setattr(statusbar, "NSStatusBar", SimpleNamespace(
         systemStatusBar=lambda: SimpleNamespace(statusItemWithLength_=lambda length: item)))
+    return button
+
+
+def test_screen_row_only_shows_on_a_mac_with_a_screen_sensor(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    bar.update({"has_screen_power": False}, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._rows["screen"].isHidden()
+    bar.update({"has_screen_power": True, "screen_power": 7.2}, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert not bar._rows["screen"].isHidden()
+    assert bar._rows["screen"].attributedTitle().string() == "Screen\t7.2 W"
+
+
+def test_update_only_redraws_what_changed(monkeypatch):
+    button = _fake_status_item(monkeypatch)
     menu_events = []
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None,
                     on_menu_open=lambda: menu_events.append(bar.menu_open))
@@ -80,8 +97,16 @@ def test_battery_status_with_a_charge_limit():
 
 
 def test_menu_bar_value_prefers_adapter_input_while_charging():
-    s = {"is_charging": True, "system_in": 105.0, "system_load": 27.0, "screen_power": 11.0}
+    s = {"is_charging": True, "system_in": 105.0, "system_load": 27.0, "screen_power": 11.0,
+         "has_screen_power": True}
     assert menu_bar_value(s, {"menu_bar_show_charging": True, "menu_bar_metric": "system"}) == 105.0
     assert menu_bar_value(s, {"menu_bar_show_charging": False, "menu_bar_metric": "screen"}) == 11.0
     assert menu_bar_value({**s, "is_charging": False}, {"menu_bar_show_charging": True,
                                                         "menu_bar_metric": "system"}) == 27.0
+
+
+def test_menu_bar_falls_back_to_system_on_a_mac_with_no_screen_sensor():
+    s = {"system_load": 27.0, "screen_power": None, "has_screen_power": False}
+    assert menu_bar_value(s, {"menu_bar_metric": "screen"}) == 27.0
+    # A missed reading on a Mac that has the sensor shows as missing, not as another number.
+    assert menu_bar_value({**s, "has_screen_power": True}, {"menu_bar_metric": "screen"}) is None
