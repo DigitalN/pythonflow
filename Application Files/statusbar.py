@@ -61,11 +61,14 @@ def menu_bar_value(sample, settings):
     """The number shown in the menu bar for the user's chosen metric."""
     if settings.get("menu_bar_show_charging") and sample.get("is_charging"):
         return sample.get("system_in")
+    metric = settings.get("menu_bar_metric")
+    if metric == "screen" and not sample.get("has_screen_power"):
+        metric = "system"  # a Mac with no screen sensor doesn't offer it; the setting stays as it was
     return {
         "system": sample.get("system_load"),
         "screen": sample.get("screen_power"),
         "chip": sample.get("chip_power"),
-    }.get(settings.get("menu_bar_metric"), sample.get("system_load"))
+    }.get(metric, sample.get("system_load"))
 
 
 class _MenuTarget(NSObject):
@@ -215,3 +218,4 @@ class StatusBar:
         else:
             self._set_row("adapter", "Not connected")
         self._rows["battery"].setHidden_(not sample.get("has_battery"))
+        self._rows["screen"].setHidden_(not sample.get("has_screen_power"))

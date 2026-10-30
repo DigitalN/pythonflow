@@ -358,7 +358,7 @@ dialog .actions { justify-content: flex-end; }
             <div class="lbl">Show in menu bar</div>
             <select id="s-metric">
               <option value="system">System power</option>
-              <option value="screen">Screen power</option>
+              <option value="screen" id="s-metric-screen">Screen power</option>
               <option value="chip">Chip power (CPU + GPU)</option>
             </select>
           </div>
@@ -628,7 +628,7 @@ function niceStep(raw) {
 
 // ── state ───────────────────────────────────────────────
 let settings = null, latest = null, seq = 0, points = [], pollTimer = null;
-let liveRange = 300, activeTab = 'now', sessions = [], selectedId = null;
+let liveRange = 300, activeTab = 'now', sessions = [], selectedId = null, screenOffered = true;
 const SERIES = [
   { key: 'system_load', name: 'System', color: '--system', on: true },
   { key: 'system_in', name: 'Adapter in', color: '--charge', on: true },
@@ -697,7 +697,7 @@ function renderNow() {
   if (hasParts) {
     const other = Math.max(0, total - (screen || 0) - (chip || 0));
     const parts = [
-      ['Screen', screen, '--screen', 'Display backlight (SMC sensor PDBR). On mini-LED screens this rises with bright content.'],
+      ['Screen', screen, '--screen', 'Display backlight, from an SMC sensor. On mini-LED screens this rises with bright content.'],
       ['Chip (CPU + GPU)', chip, '--chip', 'Apple silicon package: CPU, GPU and other on-chip blocks (SMC sensor PHPC, which Apple names after the heatpipe that cools it). Fans are not included.'],
       ['Everything else', other, '--system', 'Memory, storage, Wi-Fi, fans, speakers and other components.'],
     ].filter(p => isNum(p[1]));
@@ -731,7 +731,7 @@ function renderNow() {
   ] : [['Status', 'Not connected']]);
   kv('d-system', [
     ['Total', fmtW(s.system_load)],
-    ['Screen', fmtW(s.screen_power)],
+    ...(s.has_screen_power ? [['Screen', fmtW(s.screen_power)]] : []),
     ['Chip (CPU + GPU)', fmtW(s.chip_power)],
     ['Into Mac from adapter', s.external_connected ? fmtW(s.system_in) : '—'],
     ['Battery', isNum(bp) ? `${bp > 0 ? '+' : ''}${bp.toFixed(1)} W` : '—'],
@@ -755,8 +755,26 @@ function kv(id, rows) {
 }
 
 function renderToggles() {
-  $('live-toggles').innerHTML = SERIES.map((s, i) =>
+  $('live-toggles').innerHTML = SERIES.map((s, i) => s.key === 'screen_power' && !screenOffered ? '' :
     `<button class="toggle ${s.on ? 'on' : ''}" data-i="${i}"><i style="background:var(${s.color})"></i>${esc(s.name)}</button>`).join('');
+}
+
+// A Mac with no screen sensor doesn't offer Screen as a choice. The breakdown and History
+// skip it by themselves, since they only list what has a number.
+const screenOption = $('s-metric-screen');
+function offerScreen(offered) {
+  if (offered === screenOffered) return;
+  screenOffered = offered;
+  renderToggles();
+  if (offered) $('s-metric').insertBefore(screenOption, $('s-metric').lastElementChild);
+  else screenOption.remove();
+  showMetric();
+}
+function showMetric() {
+  if (!settings) return;
+  const metric = $('s-metric');
+  metric.value = settings.menu_bar_metric;
+  if (metric.selectedIndex < 0) metric.value = 'system';  // what the menu bar falls back to
 }
 $('live-toggles').addEventListener('click', e => {
   const b = e.target.closest('.toggle'); if (!b) return;
@@ -812,7 +830,7 @@ async function poll() {
         if (firstKeep > 0) points.splice(0, firstKeep);
       }
       seq = r.seq;
-      if (r.latest) { latest = r.latest; renderNow(); renderLiveChart(); }
+      if (r.latest) { latest = r.latest; offerScreen(latest.has_screen_power); renderNow(); renderLiveChart(); }
       if (r.update) { updateState = r.update; if (activeTab === 'settings') renderUpdateButton(); }
     }
   } catch (e) { console.error(e); }
@@ -942,7 +960,7 @@ function applyTheme() {
 
 async function renderSettings() {
   if (!settings) return;
-  $('s-metric').value = settings.menu_bar_metric;
+  showMetric();
   $('s-show-charging').checked = settings.menu_bar_show_charging;
   for (const b of $('s-theme').children) b.setAttribute('aria-selected', b.dataset.theme === settings.theme);
   const login = $('s-open-at-login');
@@ -980,7 +998,7 @@ $('s-open-at-launch').onchange = e => save({ open_dashboard_at_launch: e.target.
 $('s-update').onchange = e => save({ update_automatically: e.target.checked });
 $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
-$('s-reveal').onclick = () => call('reveal_data_folder');
+$('s-reveal').onclick = () => call('reveal_log_file');
 $('s-charge-limit').onclick = () => call('open_charging_settings');
 $('s-check-updates').onclick = () => call('check_for_updates');
 

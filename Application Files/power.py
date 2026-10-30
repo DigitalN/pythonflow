@@ -7,6 +7,7 @@ from powerd's world-readable charging prefs.
 
 Two sources, because neither is complete on its own:
   - SMC updates every second: system/adapter/screen/chip power, battery temp.
+    Which keys exist depends on the Mac, so one it can't read is logged at launch.
   - AppleSmartBattery (IORegistry) is authoritative for battery state, capacity
     and adapter details, but its power telemetry only refreshes every ~30 s.
 
@@ -21,6 +22,7 @@ import ctypes
 import ctypes.util
 import logging
 import os
+import platform
 import plistlib
 import struct
 import time
@@ -46,11 +48,17 @@ NOT_CHARGING_AT_LIMIT = 1 << 24  # NotChargingReason bit powerd sets while the c
 # Where macOS keeps the charge limit set in System Settings → Battery → Charging.
 CHARGING_PREFS = "/Library/Preferences/com.apple.powerd.charging.plist"
 
+# Display backlight power (W). The key depends on the Mac; the first one it has wins.
+SCREEN_POWER_KEYS = (
+    "PDBR",  # M1 Pro (measured)
+    "PBLR",  # base M4, Mac16,1, which has no PDBR (measured: 0.3 W at one bar, 7.2 W at full)
+    "PBwo",  # M5 and A18, according to macpow's docs (not measured)
+)
 SMC_KEYS = (
     "PDTR",  # power delivered from the adapter into the system (W)
     "PSTR",  # total system power (W)
     "PPBR",  # battery discharge power (W)
-    "PDBR",  # display backlight power (W)
+    *SCREEN_POWER_KEYS,
     "PHPC",  # chip power (W): the CPU/GPU package on the heatpipe-cooled rail (not fans)
     "TB0T",  # battery temperature (°C)
     "CHCC",  # charging flag — unreliable on macOS 27, only a last resort
@@ -211,7 +219,9 @@ assert ctypes.sizeof(_SMCKeyData) == 80
 
 _SMC_SELECTOR = 2
 _SMC_CMD_READ_BYTES = 5
+_SMC_CMD_KEY_BY_INDEX = 8
 _SMC_CMD_READ_KEYINFO = 9
+_K_IO_RETURN_NOT_PRIVILEGED = -0x1FFFFD3F  # 0xE00002C1; dozens of keys refuse even a look (measured)
 
 # SMC fixed-point types: name -> (fraction bits, signed)
 _FIXED_POINT = {
@@ -230,6 +240,14 @@ def _is_apple_silicon():
     size = ctypes.c_size_t(ctypes.sizeof(value))
     rc = _libc.sysctlbyname(b"hw.optional.arm64", ctypes.byref(value), ctypes.byref(size), None, 0)
     return rc == 0 and value.value == 1
+
+
+def _mac_model():
+    """The model identifier, like Mac16,1. It names the kind of Mac, not this one."""
+    size = ctypes.c_size_t(64)
+    value = ctypes.create_string_buffer(size.value)
+    rc = _libc.sysctlbyname(b"hw.model", value, ctypes.byref(size), None, 0)
+    return value.value.decode("ascii", "replace") if rc == 0 else "unknown Mac"
 
 
 def decode_smc_value(data_type, raw, little_endian):
@@ -293,29 +311,66 @@ class SMC:
             self._conn, _SMC_SELECTOR, ctypes.byref(request), ctypes.sizeof(_SMCKeyData),
             ctypes.byref(response), ctypes.byref(size),
         )
+        if kr == _K_IO_RETURN_NOT_PRIVILEGED:
+            raise PermissionError(f"SMC refused: {kr:#x}")
         if kr != 0:
             raise OSError(f"SMC call failed: {kr:#x}")
         return response
 
-    def read(self, key):
-        """Return the decoded value of a 4-char key, or None if this Mac doesn't have it."""
-        code = struct.unpack(">I", key.encode("ascii"))[0]
+    def _read_raw(self, key):
+        """Return (type, bytes) for a 4-char key, or None if this Mac doesn't have it.
+
+        A key that refuses counts as missing: it says nothing about the connection, and
+        raising would lose every other reading until the reconnect.
+        """
+        code = struct.unpack(">I", key.encode("latin-1"))[0]
         info = self._key_info.get(code)
-        if info is None:
-            response = self._call(_SMCKeyData(key=code, data8=_SMC_CMD_READ_KEYINFO))
-            if response.result != 0:
-                self._key_info[code] = False
+        try:
+            if info is None:
+                response = self._call(_SMCKeyData(key=code, data8=_SMC_CMD_READ_KEYINFO))
+                if response.result != 0:
+                    self._key_info[code] = False
+                    return None
+                info = (response.key_info.data_size, struct.pack(">I", response.key_info.data_type).decode("latin-1"))
+                self._key_info[code] = info
+            if info is False:
                 return None
-            info = (response.key_info.data_size, struct.pack(">I", response.key_info.data_type).decode("latin-1"))
-            self._key_info[code] = info
-        if info is False:
+            request = _SMCKeyData(key=code, data8=_SMC_CMD_READ_BYTES)
+            request.key_info.data_size = info[0]
+            response = self._call(request)
+        except PermissionError:
+            self._key_info[code] = False
             return None
-        request = _SMCKeyData(key=code, data8=_SMC_CMD_READ_BYTES)
-        request.key_info.data_size = info[0]
-        response = self._call(request)
         if response.result != 0:
             return None
-        return decode_smc_value(info[1], bytes(response.bytes[: info[0]]), self._little_endian)
+        return info[1], bytes(response.bytes[: info[0]])
+
+    def read(self, key):
+        """Return the decoded value of a 4-char key, or None if this Mac doesn't have it."""
+        found = self._read_raw(key)
+        return decode_smc_value(found[0], found[1], self._little_endian) if found else None
+
+    def power_keys(self):
+        """Every key starting with P as "NAME=value", or "NAME(type)=?" if it can't be decoded.
+
+        For the log. Other keys are named by the walk but never read, so nothing
+        identifying can end up in it.
+        """
+        found = self._read_raw("#KEY")
+        count = struct.unpack(">I", found[1][:4])[0] if found else 0  # big-endian even on Apple silicon
+        keys = []
+        for index in range(count):
+            response = self._call(_SMCKeyData(data8=_SMC_CMD_KEY_BY_INDEX, data32=index))
+            name = struct.pack(">I", response.key).decode("latin-1")
+            if response.result != 0 or not name.startswith("P"):
+                continue
+            found = self._read_raw(name)
+            value = decode_smc_value(found[0], found[1], self._little_endian) if found else None
+            if value is not None:
+                keys.append(f"{name}={value:.2f}")
+            else:
+                keys.append(f"{name}({found[0].strip() if found else 'refused'})=?")
+        return keys
 
     def read_all(self, keys=SMC_KEYS):
         values = {}
@@ -371,6 +426,12 @@ def _is_charging(b, smc):
     if isinstance(b.get("IsCharging"), bool):
         return b["IsCharging"]
     return smc.get("CHCC", 0) > 0
+
+
+def missing_smc_keys(smc):
+    """The keys in SMC_KEYS that gave no value. Any one screen key is enough."""
+    has_screen = any(k in smc for k in SCREEN_POWER_KEYS)
+    return [k for k in SMC_KEYS if k not in smc and not (has_screen and k in SCREEN_POWER_KEYS)]
 
 
 def normalize(battery, smc, now=None, charge_limit=None):
@@ -469,6 +530,7 @@ def normalize(battery, smc, now=None, charge_limit=None):
 
     amps = _num(b.get("InstantAmperage"))
     volts = _num(b.get("Voltage"))
+    screen_power = next((smc[k] for k in SCREEN_POWER_KEYS if k in smc), None)
     return {
         "t": now,
         "has_battery": has_battery,
@@ -485,7 +547,8 @@ def normalize(battery, smc, now=None, charge_limit=None):
         "battery_power": _round(battery_power),
         "adapter_power": _round((system_in or 0) + efficiency_loss) if external else 0.0,
         "efficiency_loss": _round(efficiency_loss),
-        "screen_power": _round(smc.get("PDBR")),
+        "screen_power": _round(screen_power),
+        "has_screen_power": screen_power is not None,
         "chip_power": _round(smc.get("PHPC")),
         "temperature": _round(temperature, 1),
         "cycle_count": _num(b.get("CycleCount")),
@@ -510,6 +573,8 @@ class PowerReader:
         self._last_external = None
         self._charge_limit = None
         self._charging_prefs_mtime = None
+        self._checked_smc_keys = False
+        self._has_screen_power = False
         self._open_smc()
 
     def _open_smc(self):
@@ -535,6 +600,20 @@ class PowerReader:
             self._smc_retry_at = time.monotonic() + SMC_RETRY_SECONDS
             return {}
 
+    def _log_missing_smc_keys(self, smc):
+        """Once per launch, name any key this Mac can't read, plus the power keys it does
+        have. A new Mac's screen sensor can be found from that without any other tools."""
+        self._checked_smc_keys = True
+        missing = missing_smc_keys(smc)
+        if not missing:
+            return
+        try:
+            keys = " ".join(self._smc.power_keys())
+        except OSError as e:
+            keys = f"unavailable ({e})"
+        log.info("SMC keys missing on %s, macOS %s: %s. Power keys here: %s",
+                 _mac_model(), platform.mac_ver()[0], ", ".join(missing), keys)
+
     def _read_charge_limit(self):
         """Re-read powerd's charging prefs only when the file has changed."""
         try:
@@ -558,6 +637,8 @@ class PowerReader:
     def read(self):
         with objc.autorelease_pool():
             smc = self._read_smc()
+            if smc and not self._checked_smc_keys:
+                self._log_missing_smc_keys(smc)
             # Plugging in or unplugging shows up in SMC instantly; refresh the
             # registry right away so charge state doesn't lag the power numbers.
             external_hint = smc.get("PDTR", 0) > 1.0 if "PDTR" in smc else None
@@ -570,4 +651,8 @@ class PowerReader:
                 self._read_charge_limit()
                 self._battery_read_at = time.monotonic()
                 self._last_external = external_hint
-            return normalize(self._battery, smc, charge_limit=self._charge_limit)
+            sample = normalize(self._battery, smc, charge_limit=self._charge_limit)
+            # Once seen, it stays: a failed read or an SMC reconnect shouldn't hide Screen.
+            self._has_screen_power = self._has_screen_power or sample["has_screen_power"]
+            sample["has_screen_power"] = self._has_screen_power
+            return sample

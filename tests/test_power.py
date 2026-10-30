@@ -1,5 +1,6 @@
 """normalize() against registry shapes seen on real Macs, plus SMC decoding."""
 
+import logging
 import plistlib
 import struct
 
@@ -205,6 +206,138 @@ def test_decode_smc_value_types():
     assert decode_smc_value("sp78", struct.pack(">h", int(30.5 * 256)), little_endian=True) == 30.5
     assert decode_smc_value("fpe2", struct.pack(">H", 4 * 100), little_endian=False) == 100.0
     assert decode_smc_value("????", b"\x00" * 4, little_endian=True) is None
+
+
+def test_screen_power_comes_from_whichever_key_this_mac_has():
+    s = normalize(None, {"PBLR": 7.204}, now=1.0)  # base M4
+    assert s["screen_power"] == 7.2 and s["has_screen_power"]
+    assert normalize(None, {"PDBR": 5.0, "PBLR": 7.2}, now=1.0)["screen_power"] == 5.0
+    s = normalize(None, {"PBLR": 0.0}, now=1.0)  # backlight off is still a reading
+    assert s["screen_power"] == 0.0 and s["has_screen_power"]
+    s = normalize(None, {"PHPC": 2.5}, now=1.0)  # a Mac with no screen sensor
+    assert s["screen_power"] is None and not s["has_screen_power"]
+
+
+def _every_key_but_screen():
+    return {k: 1.0 for k in power.SMC_KEYS if k not in power.SCREEN_POWER_KEYS}
+
+
+def test_missing_smc_keys_only_needs_one_screen_key():
+    others = _every_key_but_screen()
+    assert power.missing_smc_keys({**others, "PBLR": 7.2}) == []
+    assert power.missing_smc_keys(others) == list(power.SCREEN_POWER_KEYS)
+    del others["PHPC"]
+    assert power.missing_smc_keys({**others, "PDBR": 5.0}) == ["PHPC"]
+
+
+def _code(name):
+    return struct.unpack(">I", name.encode())[0]
+
+
+class _StubConnection(power.SMC):
+    """The real SMC class with its IOKit call replaced. Keys map to (type, bytes), or None
+    for one that refuses, as dozens do on a real Mac."""
+
+    def __init__(self, keys):
+        self._conn, self._key_info, self._little_endian = 0, {}, True
+        self.keys, self.values_read = keys, []
+
+    def _call(self, request):
+        if request.data8 == power._SMC_CMD_KEY_BY_INDEX:
+            return power._SMCKeyData(key=_code(list(self.keys)[request.data32]))
+        name = struct.pack(">I", request.key).decode()
+        if self.keys[name] is None:
+            raise PermissionError("SMC refused")
+        data_type, raw = self.keys[name]
+        response = power._SMCKeyData()
+        if request.data8 == power._SMC_CMD_READ_KEYINFO:
+            response.key_info.data_size, response.key_info.data_type = len(raw), _code(data_type)
+        else:
+            self.values_read.append(name)
+            response.bytes[:len(raw)] = list(raw)
+        return response
+
+
+def test_a_key_that_refuses_counts_as_missing_and_costs_no_other_reading():
+    smc = _StubConnection({"PHPC": ("flt ", struct.pack("<f", 2.5)), "PBwo": None})
+    assert smc.read_all(("PBwo", "PHPC")) == {"PHPC": 2.5}
+
+
+def test_power_keys_only_reads_keys_starting_with_p():
+    smc = _StubConnection({
+        "#KEY": ("ui32", struct.pack(">I", 5)),  # big-endian, unlike the values
+        "RSer": ("ch8*", b"IDENTIFYING"),
+        "PBLR": ("flt ", struct.pack("<f", 7.25)),
+        "PXXX": ("hex_", b"\x01"),
+        "PNOP": None,
+    })
+    assert smc.power_keys() == ["PBLR=7.25", "PXXX(hex_)=?", "PNOP(refused)=?"]
+    assert "RSer" not in smc.values_read
+
+
+class _StubSMC:
+    def __init__(self, *readings):
+        self.readings, self.walks = list(readings), 0
+
+    def read_all(self):
+        return self.readings.pop(0)
+
+    def power_keys(self):
+        self.walks += 1
+        return ["PHPC=2.50", "PZZZ=1.00"]
+
+
+def _reader(monkeypatch, smc):
+    monkeypatch.setattr(power, "SMC", lambda: smc)
+    monkeypatch.setattr(power, "read_battery_registry", lambda: None)
+    return power.PowerReader()
+
+
+def _missing_key_lines(caplog):
+    return [r.getMessage() for r in caplog.records if "SMC keys missing" in r.getMessage()]
+
+
+def test_missing_keys_are_logged_once_per_launch(monkeypatch, caplog):
+    others = _every_key_but_screen()
+    smc = _StubSMC(others, others)
+    reader = _reader(monkeypatch, smc)
+    with caplog.at_level(logging.INFO, logger="power"):
+        reader.read()
+        reader.read()
+    [line] = _missing_key_lines(caplog)
+    assert "PDBR, PBLR, PBwo" in line and "PZZZ=1.00" in line
+    assert smc.walks == 1
+
+
+def test_a_mac_with_every_key_logs_nothing_and_skips_the_walk(monkeypatch, caplog):
+    smc = _StubSMC({**_every_key_but_screen(), "PBLR": 7.2})
+    with caplog.at_level(logging.INFO, logger="power"):
+        _reader(monkeypatch, smc).read()
+    assert _missing_key_lines(caplog) == [] and smc.walks == 0
+
+
+def test_the_check_waits_for_a_working_smc_read(monkeypatch, caplog):
+    smc = _StubSMC({}, _every_key_but_screen())
+    reader = _reader(monkeypatch, smc)
+    with caplog.at_level(logging.INFO, logger="power"):
+        reader.read()
+        assert _missing_key_lines(caplog) == []
+        reader.read()
+    assert len(_missing_key_lines(caplog)) == 1
+
+
+def test_screen_stays_offered_through_a_missed_reading(monkeypatch):
+    reader = _reader(monkeypatch, _StubSMC({"PBLR": 7.2}, {}, {"PSTR": 9.0}))
+    assert reader.read()["has_screen_power"]
+    for _ in range(2):
+        s = reader.read()
+        assert s["screen_power"] is None and s["has_screen_power"]
+
+
+def test_a_mac_with_no_screen_sensor_never_offers_it(monkeypatch):
+    reader = _reader(monkeypatch, _StubSMC({"PSTR": 9.0}, {"PSTR": 9.0}))
+    assert not reader.read()["has_screen_power"]
+    assert not reader.read()["has_screen_power"]
 
 
 def test_reads_this_mac():

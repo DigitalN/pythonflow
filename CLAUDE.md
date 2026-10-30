@@ -11,7 +11,10 @@ reports a bug, **read the log first** before asking questions. The updater logs
 `Automatic updates off: <reason>` at launch, and `Up to date at`, `Downloading`,
 `ready to install`, `Installed …; relaunching` or `Update check failed: …` after a
 check. Each launch logs `started (dashboard shown)` or `started (dashboard hidden)`,
-plus `, opened at login` for a login launch.
+plus `, opened at login` for a login launch. A Mac missing any SMC key the app reads
+logs `SMC keys missing on <model>, macOS <version>: …` once per launch, with the power
+keys it does have. Reopening the app at one bar of brightness and again at full shows
+which of them is the screen.
 
 A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
 setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
@@ -90,6 +93,9 @@ To reproduce without touching the user's data, run with
   menu's rows are only filled in while it's open. On the page, the once-a-second
   writes go through `put()`, which skips values already shown, and the Now page only
   renders while it's the active tab. Charts draw at most one point per device pixel.
+- The SMC key for screen power depends on the Mac, and the first one found wins: `PDBR`
+  (M1 Pro, measured), `PBLR` (base M4 Mac16,1, which has no `PDBR`; measured at 0.3 W at
+  one bar and 7.2 W at full), `PBwo` (M5 and A18 per macpow's docs, not measured).
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
   the fans stay at minimum.
@@ -159,6 +165,8 @@ Don't undo these without asking:
 - At login the app starts in the menu bar only, whatever *Open this window at launch*
   says; that setting covers opening the app by hand. Opening the app again while it
   runs in the background shows the dashboard.
+- A Mac with no screen reading doesn't show Screen anywhere, and the menu bar falls back
+  to System if Screen was chosen. It happens automatically, and there's no estimate.
 - The dashboard window opens as tall as the page, up to the screen's height, and can't
   be made wider or taller than the page needs: extra size only added empty space.
   Switching tabs resizes it to the new page.

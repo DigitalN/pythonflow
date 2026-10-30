@@ -245,11 +245,11 @@ class Api:
         self._app._store.export_csv(session_id, path)
         return path
 
-    def reveal_data_folder(self):
+    def reveal_log_file(self):
         from AppKit import NSURL, NSWorkspace
         from PyObjCTools import AppHelper
 
-        url = NSURL.fileURLWithPath_(str(DATA_DIR))
+        url = NSURL.fileURLWithPath_(str(LOG_PATH))
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().activateFileViewerSelectingURLs_, [url])
 
     def open_charging_settings(self):

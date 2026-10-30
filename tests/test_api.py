@@ -4,7 +4,16 @@ from types import SimpleNamespace
 
 from PyObjCTools import AppHelper
 
-from main import CHARGING_SETTINGS_URL, Api, LiveState
+from main import CHARGING_SETTINGS_URL, LOG_PATH, Api, LiveState
+
+
+def test_log_file_button_shows_the_log_file(monkeypatch):
+    calls = []
+    monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
+    Api(app=None).reveal_log_file()
+    [(func, ([url],))] = calls
+    assert func.__name__ == "activateFileViewerSelectingURLs_"
+    assert url.path() == str(LOG_PATH)
 
 
 def test_charge_limit_button_opens_charging(monkeypatch):
